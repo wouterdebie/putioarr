@@ -3,6 +3,7 @@ use std::time::Duration;
 use actix_web::{web, App, HttpServer};
 use appdata::AppData;
 use clap::{Args, Parser, Subcommand};
+use log::info;
 use tokio::time::sleep;
 
 mod appdata;
@@ -57,6 +58,8 @@ struct RunArgs {
     uid: u32,
 }
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let cli = Cli::parse();
@@ -65,6 +68,8 @@ async fn main() -> std::io::Result<()> {
         Commands::Run(args) => {
             std::env::set_var("RUST_LOG", args.loglevel.as_str());
             env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
+
+            info!("Starting putioarr, version {}", VERSION);
 
             let app_data = web::Data::new(
                 AppData::new(
