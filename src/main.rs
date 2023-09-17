@@ -51,6 +51,10 @@ struct RunArgs {
 
     #[arg(short, long, default_value_t = String::from("info"))]
     loglevel: String,
+
+    /// UID of the user owning the donwloads
+    #[arg(short, long, default_value_t = 1000)]
+    uid: u32,
 }
 
 #[actix_web::main]
@@ -67,6 +71,7 @@ async fn main() -> std::io::Result<()> {
                     args.api_token.clone(),
                     args.state_file.clone(),
                     args.download_directory.clone(),
+                    args.uid,
                 )
                 .await
                 .unwrap(),

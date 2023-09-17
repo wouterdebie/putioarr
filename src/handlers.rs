@@ -6,6 +6,7 @@ use crate::{
 };
 use actix_web::web;
 use base64::Engine;
+use log::info;
 use serde_json::json;
 
 pub(crate) async fn handle_torrent_add(
@@ -25,6 +26,7 @@ pub(crate) async fn handle_torrent_add(
         let url = arguments["filename"].as_str().unwrap();
         putio::add_transfer(api_token, url).await.unwrap();
     };
+    info!("Torrent uploaded");
     None
 }
 pub(crate) async fn handle_torrent_remove(

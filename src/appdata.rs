@@ -18,6 +18,7 @@ pub(crate) struct AppData {
     pub tx: Sender<bool>,
     pub rx: Receiver<bool>,
     pub download_dir: String,
+    pub uid: u32
 }
 
 impl AppData {
@@ -25,6 +26,7 @@ impl AppData {
         api_token: String,
         state_file: String,
         download_directory: String,
+        uid: u32
     ) -> anyhow::Result<Self> {
         // Load state if file exists
         info!("Loading state..");
@@ -46,6 +48,7 @@ impl AppData {
             tx,
             rx,
             download_dir: download_directory,
+            uid
         })
     }
 

@@ -31,6 +31,7 @@ pub(crate) struct Download {
 pub(crate) async fn start_downloader_task(app_data: Data<AppData>) -> Result<()> {
     let api_token = &app_data.api_token;
     let download_dir = &app_data.download_dir;
+    let uid = app_data.uid;
     let ten_seconds = std::time::Duration::from_secs(10);
 
     // Never wait when starting up
@@ -44,10 +45,6 @@ pub(crate) async fn start_downloader_task(app_data: Data<AppData>) -> Result<()>
 
         loop {
             let transfers = putio::list_transfers(api_token).await?.transfers;
-            if transfers.is_empty() {
-                info!("Downloader stopped");
-                break;
-            }
 
             for transfer in &transfers {
                 // Don't even bother with unfinished transfers
@@ -158,7 +155,7 @@ pub(crate) async fn start_downloader_task(app_data: Data<AppData>) -> Result<()>
                         .lock()
                         .await
                         .insert(transfer.hash.clone(), d);
-                    let targets = download(api_token, file_id, download_dir).await?;
+                    let targets = download(api_token, file_id, download_dir, uid).await?;
                     {
                         let mut m = app_data.downloads.lock().await;
                         let d = m.get_mut(&transfer.hash).unwrap();
@@ -170,7 +167,7 @@ pub(crate) async fn start_downloader_task(app_data: Data<AppData>) -> Result<()>
             }
             // Clean up manually cancelled transfers
             {
-                let transfer_keys: Vec<String> = transfers.into_iter().map(|t| t.hash).collect();
+                let transfer_keys: Vec<String> = transfers.iter().map(|t| t.hash.clone()).collect();
                 let mut downloads = app_data.downloads.lock().await;
                 downloads.retain(|k, _| {
                     if !transfer_keys.contains(k) {
@@ -180,6 +177,10 @@ pub(crate) async fn start_downloader_task(app_data: Data<AppData>) -> Result<()>
                         true
                     }
                 });
+            }
+            if transfers.is_empty() {
+                info!("No more transfers, downloader stopped.");
+                break;
             }
             sleep(ten_seconds).await;
         }
@@ -198,6 +199,7 @@ pub(crate) async fn download(
     api_token: &str,
     file_id: u64,
     download_dir: &str,
+    uid: u32,
 ) -> Result<Vec<DownloadedTarget>> {
     let listing = get_download_operations(api_token, file_id, download_dir).await?;
     let mut targets = Vec::<DownloadedTarget>::new();
@@ -206,7 +208,7 @@ pub(crate) async fn download(
             DownloadType::Directory => {
                 if !Path::new(&op.target).exists() {
                     fs::create_dir(&op.target)?;
-                    op.target.clone().set_owner(1000)?;
+                    op.target.clone().set_owner(uid)?;
                 }
             }
             DownloadType::File => {
@@ -214,7 +216,7 @@ pub(crate) async fn download(
                 if Path::new(&op.target).exists() {
                     fs::remove_file(&op.target)?;
                 }
-                fetch_url(op.url.context("No URL found")?, op.target.clone()).await?
+                fetch_url(op.url.context("No URL found")?, op.target.clone(), uid).await?
             }
         }
         targets.push(DownloadedTarget {
@@ -227,7 +229,7 @@ pub(crate) async fn download(
     Ok(targets)
 }
 
-async fn fetch_url(url: String, target: String) -> Result<()> {
+async fn fetch_url(url: String, target: String, uid: u32) -> Result<()> {
     // dbg!(url, target);
     info!("Downloading {} started...", &target);
     let tmp_path = format!("{}.downloading", &target);
@@ -237,7 +239,7 @@ async fn fetch_url(url: String, target: String) -> Result<()> {
     while let Some(item) = byte_stream.next().await {
         tokio::io::copy(&mut item?.as_ref(), &mut tmp_file).await?;
     }
-    tmp_path.clone().set_owner(1000)?;
+    tmp_path.clone().set_owner(uid)?;
     fs::rename(&tmp_path, &target)?;
     info!("Downloading {} finished...", &target);
     Ok(())
