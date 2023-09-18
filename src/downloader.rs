@@ -45,15 +45,16 @@ pub(crate) async fn start_downloader_task(app_data: Data<AppData>) -> Result<()>
 
         loop {
             let transfers = putio::list_transfers(api_token).await?.transfers;
-
+            info!("Active transfers: {}", transfers.len());
             for transfer in &transfers {
                 // Don't even bother with unfinished transfers
                 if !transfer.userfile_exists {
                     continue;
                 }
-
+                dbg!(1);
                 // We know about this download and maybe need to update status
                 if app_data.downloads.lock().await.contains_key(&transfer.hash) {
+                    dbg!(1);
                     // Don't bother with imported transfers that are still seeding, but delete if they're not
                     {
                         let mut m = app_data.downloads.lock().await;
@@ -85,7 +86,7 @@ pub(crate) async fn start_downloader_task(app_data: Data<AppData>) -> Result<()>
                             .collect()
                     };
 
-                    // Check if any of the files have more than 1 hardling. If so, this means
+                    // Check if all of the files have more than 1 hardlink. If so, this means
                     // that Sonarr has imported the file. Thus, we can delete the import.
                     let imported = targets
                         .iter()
@@ -98,7 +99,7 @@ pub(crate) async fn start_downloader_task(app_data: Data<AppData>) -> Result<()>
                                 None
                             }
                         })
-                        .any(|x| x);
+                        .all(|x| x);
 
                     if imported {
                         info!("'{}' has been imported. Deleting files.", &transfer.name);
@@ -141,6 +142,7 @@ pub(crate) async fn start_downloader_task(app_data: Data<AppData>) -> Result<()>
                         app_data.save().await?;
                     }
                 } else {
+                    dbg!(3);
                     // We don't know this transfer yet, but we should download it
                     info!("Downloading transfer '{}'", transfer.hash);
                     let d = Download {
@@ -266,36 +268,43 @@ async fn get_download_operations(
 ) -> Result<Vec<DownloadOperation>> {
     let mut operations = Vec::<DownloadOperation>::new();
     let response = putio::list_files(api_token, file_id).await?;
-    if response.parent.content_type == "application/x-directory" {
-        let target = Path::new(download_dir)
-            .join(&response.parent.name)
-            .to_string_lossy()
-            .to_string();
 
-        operations.push(DownloadOperation {
-            url: None,
-            download_type: DownloadType::Directory,
-            target: target.clone(),
-        });
-        let new_base = format!("{}/", &target);
-        for file in response.files {
-            operations
-                .append(&mut get_download_operations(api_token, file.id, new_base.as_str()).await?)
+    match response.parent.file_type.as_str() {
+        "FOLDER" => {
+            let target = Path::new(download_dir)
+                .join(&response.parent.name)
+                .to_string_lossy()
+                .to_string();
+
+            operations.push(DownloadOperation {
+                url: None,
+                download_type: DownloadType::Directory,
+                target: target.clone(),
+            });
+            let new_base = format!("{}/", &target);
+            for file in response.files {
+                operations.append(
+                    &mut get_download_operations(api_token, file.id, new_base.as_str()).await?,
+                );
+            }
         }
-    } else {
-        // Get download URL for file
-        let url = putio::url(api_token, response.parent.id).await?;
+        "VIDEO" => {
+            // Get download URL for file
+            let url = putio::url(api_token, response.parent.id).await?;
 
-        let target = Path::new(download_dir)
-            .join(&response.parent.name)
-            .to_string_lossy()
-            .to_string();
+            let target = Path::new(download_dir)
+                .join(&response.parent.name)
+                .to_string_lossy()
+                .to_string();
 
-        operations.push(DownloadOperation {
-            url: Some(url),
-            download_type: DownloadType::File,
-            target,
-        })
+            operations.push(DownloadOperation {
+                url: Some(url),
+                download_type: DownloadType::File,
+                target,
+            });
+        }
+        _ => {}
     }
+
     Ok(operations)
 }

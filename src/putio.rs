@@ -146,6 +146,7 @@ pub struct FileResponse {
     pub content_type: String,
     pub id: u64,
     pub name: String,
+    pub file_type: String
 }
 
 pub async fn list_files(api_token: &str, file_id: u64) -> Result<ListFileResponse> {
