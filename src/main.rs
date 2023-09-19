@@ -7,12 +7,12 @@ use log::info;
 use tokio::time::sleep;
 
 mod appdata;
-mod downloader;
 mod handlers;
 mod oob;
 mod putio;
 mod routes;
 mod transmission;
+mod downloader;
 
 /// put.io to sonarr/radarr proxy
 #[derive(Parser, Debug)]
@@ -82,11 +82,9 @@ async fn main() -> std::io::Result<()> {
                 .unwrap(),
             );
 
-            // Actix background jobs
-            let data_for_background = app_data.clone();
-            actix_rt::spawn(async { downloader::start_downloader_task(data_for_background).await });
+            let data_for_download_system = app_data.clone();
+            downloader::start_download_system(data_for_download_system).await.unwrap();
 
-            // let http_server_data = data.clone();
             HttpServer::new(move || {
                 App::new()
                     // .wrap(Logger::new(
@@ -110,8 +108,6 @@ async fn main() -> std::io::Result<()> {
             println!("Waiting for link...");
 
             // Every three seconds, check if the OOB code was linked to the user's account
-            // If linked, update the config file
-            // Stops after 10 tries (30 seconds)
             let three_seconds = Duration::from_secs(3);
 
             loop {

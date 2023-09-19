@@ -1,5 +1,5 @@
 use crate::{
-    downloader::DownloadStatus,
+    // downloader::DownloadStatus,
     putio::{self, PutIOTransfer},
     transmission::{TransmissionRequest, TransmissionTorrent},
     AppData,
@@ -76,17 +76,7 @@ pub(crate) async fn handle_torrent_get(
 ) -> Option<serde_json::Value> {
     let transfers = putio::list_transfers(api_token).await.unwrap().transfers;
 
-    let transmission_transfers = transfers.into_iter().map(|mut t| async {
-        let status = if let Some(d) = app_data.downloads.lock().await.get(&t.hash) {
-            match d.status {
-                DownloadStatus::Downloading => "DOWNLOADING",
-                DownloadStatus::Downloaded | DownloadStatus::Imported => "STOPPED",
-            }
-        } else {
-            &t.status
-        };
-
-        t.status = String::from(status);
+    let transmission_transfers = transfers.into_iter().map(|t| async {
         let mut tt: TransmissionTorrent = t.into();
         tt.download_dir = app_data.download_dir.clone();
         tt

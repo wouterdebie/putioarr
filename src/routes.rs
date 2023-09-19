@@ -11,7 +11,6 @@ use actix_web::{
 };
 use actix_web_httpauth::headers::authorization::{Authorization, Basic};
 use anyhow::{Context, Result};
-use log::info;
 use serde_json::json;
 
 #[post("/transmission/rpc")]
@@ -39,12 +38,7 @@ pub(crate) async fn rpc_post(
         "torrent-set" => None, // Nothing to do here
         "queue-move-top" => None,
         "torrent-remove" => handle_torrent_remove(api_token, &payload).await,
-        "torrent-add" => {
-            let a = handle_torrent_add(api_token, &payload).await;
-            info!("Torrent added, informing download task.");
-            app_data.tx.send(true).await.unwrap();
-            a
-        }
+        "torrent-add" => handle_torrent_add(api_token, &payload).await,
         _ => panic!("Unknwon method {}", payload.method),
     };
 

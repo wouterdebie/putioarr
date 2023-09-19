@@ -61,11 +61,28 @@ pub struct ListTransferResponse {
     pub transfers: Vec<PutIOTransfer>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct GetTransferResponse {
+    pub transfer: PutIOTransfer,
+}
+
 /// Returns the user's transfers.
 pub async fn list_transfers(api_token: &str) -> Result<ListTransferResponse> {
     let client = reqwest::Client::new();
     let response: ListTransferResponse = client
         .get("https://api.put.io/v2/transfers/list")
+        .header("authorization", format!("Bearer {}", api_token))
+        .send()
+        .await?
+        .json()
+        .await?;
+    Ok(response)
+}
+
+pub async fn get_transfer(api_token: &str, id: u64) -> Result<GetTransferResponse> {
+    let client = reqwest::Client::new();
+    let response: GetTransferResponse = client
+        .get(format!("https://api.put.io/v2/transfers/{}", id))
         .header("authorization", format!("Bearer {}", api_token))
         .send()
         .await?
@@ -146,7 +163,7 @@ pub struct FileResponse {
     pub content_type: String,
     pub id: u64,
     pub name: String,
-    pub file_type: String
+    pub file_type: String,
 }
 
 pub async fn list_files(api_token: &str, file_id: u64) -> Result<ListFileResponse> {
