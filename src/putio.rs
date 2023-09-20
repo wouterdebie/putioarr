@@ -31,6 +31,12 @@ pub struct PutIOTransfer {
     pub userfile_exists: bool,
 }
 
+impl PutIOTransfer {
+    pub fn is_downloadable(&self) -> bool {
+        self.file_id.is_none()
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct AccountInfoResponse {
     pub info: Info,

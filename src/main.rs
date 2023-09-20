@@ -1,28 +1,32 @@
-use std::time::Duration;
-
 use actix_web::{web, App, HttpServer};
-use appdata::AppData;
-use clap::{Args, Parser, Subcommand};
+use anyhow::{Context, Result};
+use clap::{Parser, Subcommand};
+use directories::ProjectDirs;
+use figment::{
+    providers::{Format, Serialized, Toml},
+    Figment,
+};
 use log::info;
+use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use tokio::time::sleep;
-
-mod appdata;
+// mod appdata;
+mod downloader;
 mod handlers;
 mod oob;
 mod putio;
 mod routes;
 mod transmission;
-mod downloader;
 
 /// put.io to sonarr/radarr proxy
-#[derive(Parser, Debug)]
+#[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
 }
 
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand)]
 enum Commands {
     /// Run the proxy
     Run(RunArgs),
@@ -30,60 +34,68 @@ enum Commands {
     GetToken,
 }
 
-#[derive(Args, Debug)]
+#[derive(Parser)]
 struct RunArgs {
-    /// put.io API token
-    #[arg(short, long)]
-    api_token: String,
+    #[arg(short, long = "config", default_value_t = ProjectDirs::from("nl", "evenflow", "putioarr").unwrap().config_dir().join("config.toml").into_os_string().into_string().unwrap(), env("APP_CONFIG_PATH"))]
+    pub config_path: String,
+}
 
-    /// File path where state is saved
-    #[arg(short, long)]
-    state_file: String,
-
-    /// Directory where downloads are saved
-    #[arg(short, long)]
-    download_directory: String,
-
-    #[arg(short, long, default_value_t = 7070)]
-    port: u16,
-
-    #[arg(short, long, default_value_t = String::from("0.0.0.0"))]
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct Config {
     bind_address: String,
-
-    #[arg(short, long, default_value_t = String::from("info"))]
+    port: u16,
     loglevel: String,
-
-    /// UID of the user owning the donwloads
-    #[arg(short, long, default_value_t = 1000)]
+    download_directory: String,
     uid: u32,
+    putio: PutioConfig,
+    sonarr: Option<ArrConfig>,
+    radarr: Option<ArrConfig>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct PutioConfig {
+    api_key: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ArrConfig {
+    url: String,
+    api_key: String,
+}
+
+pub struct AppData {
+    pub config: Config,
 }
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[actix_web::main]
-async fn main() -> std::io::Result<()> {
+async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match &cli.command {
         Commands::Run(args) => {
-            std::env::set_var("RUST_LOG", args.loglevel.as_str());
+            let config: Config = Figment::new()
+                .join(Serialized::default("bind_address", "0.0.0.0"))
+                .join(Serialized::default("port", 7070))
+                .join(Serialized::default("loglevel", "info"))
+                .join(Serialized::default("uid", 1000))
+                .merge(Toml::file(&args.config_path))
+                .extract()?;
+
+            std::env::set_var("RUST_LOG", config.loglevel.as_str());
             env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
 
             info!("Starting putioarr, version {}", VERSION);
 
-            let app_data = web::Data::new(
-                AppData::new(
-                    args.api_token.clone(),
-                    args.state_file.clone(),
-                    args.download_directory.clone(),
-                    args.uid,
-                )
-                .await
-                .unwrap(),
-            );
+            let app_data = web::Data::new(AppData {
+                config: config.clone(),
+            });
 
             let data_for_download_system = app_data.clone();
-            downloader::start_download_system(data_for_download_system).await.unwrap();
+            downloader::start_download_system(data_for_download_system)
+                .await
+                .unwrap();
 
             HttpServer::new(move || {
                 App::new()
@@ -94,9 +106,10 @@ async fn main() -> std::io::Result<()> {
                     .service(routes::rpc_post)
                     .service(routes::rpc_get)
             })
-            .bind(("0.0.0.0", args.port))?
+            .bind((config.bind_address, config.port))?
             .run()
             .await
+            .context("Unable to start http server")
         }
         Commands::GetToken => {
             // Create new OOB code and prompt user to link

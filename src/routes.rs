@@ -19,7 +19,7 @@ pub(crate) async fn rpc_post(
     req: HttpRequest,
     app_data: web::Data<AppData>,
 ) -> HttpResponse {
-    let api_token = &app_data.api_token;
+    let putio_api_token = &app_data.config.putio.api_key;
 
     // Not sure if necessary since we might just look at the session id.
     if validate_user(req).await.is_err() {
@@ -31,14 +31,14 @@ pub(crate) async fn rpc_post(
 
     let arguments = match payload.method.as_str() {
         "session-get" => Some(json!(TransmissionConfig {
-            download_dir: app_data.download_dir.clone(),
+            download_dir: app_data.config.download_directory.clone(),
             ..Default::default()
         })),
-        "torrent-get" => handle_torrent_get(api_token, &app_data).await,
+        "torrent-get" => handle_torrent_get(putio_api_token, &app_data).await,
         "torrent-set" => None, // Nothing to do here
         "queue-move-top" => None,
-        "torrent-remove" => handle_torrent_remove(api_token, &payload).await,
-        "torrent-add" => handle_torrent_add(api_token, &payload).await,
+        "torrent-remove" => handle_torrent_remove(putio_api_token, &payload).await,
+        "torrent-add" => handle_torrent_add(putio_api_token, &payload).await,
         _ => panic!("Unknwon method {}", payload.method),
     };
 

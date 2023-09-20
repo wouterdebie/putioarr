@@ -78,7 +78,7 @@ pub(crate) async fn handle_torrent_get(
 
     let transmission_transfers = transfers.into_iter().map(|t| async {
         let mut tt: TransmissionTorrent = t.into();
-        tt.download_dir = app_data.download_dir.clone();
+        tt.download_dir = app_data.config.download_directory.clone();
         tt
     });
     let transmission_transfers: Vec<TransmissionTorrent> =
