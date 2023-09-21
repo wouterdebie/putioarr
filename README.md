@@ -18,7 +18,7 @@ Make sure you have a [proper rust installation](https://www.rust-lang.org/tools/
     - Directory: <sonarr/radarr download dir>
 
 ## Behavior
-The proxy will upload torrents or magnet links to put.io. It will then continue to monitor transfers. When a transfer is completed, all files belonging to the transfer will be downloaded to the specified download directory. The proxy will remove the files after Sonarr/Radarr has imported them and put.io is done seeding.
+The proxy will upload torrents or magnet links to put.io. It will then continue to monitor transfers. When a transfer is completed, all files belonging to the transfer will be downloaded to the specified download directory. The proxy will remove the files after Sonarr/Radarr has imported them and put.io is done seeding. The proxy will skip directories named "Sample".
 
 ## Configuration
 A configuration file can be specified using `-c`, but the default configuration file location is:
@@ -63,10 +63,14 @@ api_key = "MYRADARRAPIKEY"
 
 ## TODO:
 - Better Error handling and retry behavior
-- Multi-threaded downloads
+- Multi-threaded downloads (?)
 - The session ID provided is hard coded. Not sure if it matters.
 - (Add option to not delete downloads)
 - Docker image
+- Figure out a better way to map a transfer to a completed import. Since a transfer can contain multiple files (e.g. a whole season) we currently check if all video files have been imported. Most of the time this is fine, except when there are sample videos. Sonarr/radarr will not import samples, but will make no mention of the fact that the sample was skipped. Right now we only check if there are any directories named "sample" (case insensitive) and just skip them for download alltogether, but this might not be enough. Future options:
+    - Let the user keep a list of directories that can be skipped
+    - Let the user keep a list of regexes that can be skipped. This is potentially dangerous, since this might lead to false positives.
+
 
 ## Thanks
 Thanks to [davidchalifoux](https://github.com/davidchalifoux) for borrowed code from kaput-cli.
