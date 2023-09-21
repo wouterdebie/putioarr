@@ -49,12 +49,14 @@ async fn produce_transfers(app_data: Data<AppData>, tx: Sender<MessageType>) -> 
     {
         let mut message: Message = transfer.into();
         if transfer.is_downloadable() {
-            let targets = get_download_targets(&app_data, message.file_id).await?;
+            let targets = get_download_targets(&app_data, message.file_id.unwrap()).await?;
             message.targets = Some(targets);
             if is_imported(&app_data, &message).await {
                 info!("{} already imported. Notifying of import.", &message.name);
                 seen.push(message.transfer_id);
                 tx.send(MessageType::Imported(message)).await?;
+            } else {
+                info!("{} not imported yet. Continuing as normal.", &message.name);
             }
         }
     }
@@ -68,7 +70,7 @@ async fn produce_transfers(app_data: Data<AppData>, tx: Sender<MessageType>) -> 
             debug!("Active transfers: {:?}", transfers);
         }
         for transfer in &transfers {
-            if seen.contains(&transfer.id) || transfer.is_downloadable() {
+            if seen.contains(&transfer.id) || !transfer.is_downloadable() {
                 continue;
             }
 
@@ -118,7 +120,7 @@ impl Worker {
             match msg {
                 MessageType::QueuedForDownload(m) => {
                     info!("Downloading {}", m.name);
-                    let targets = Some(download(&self.app_data, m.file_id).await?);
+                    let targets = Some(download(&self.app_data, m.file_id.unwrap()).await?);
                     info!("Downloading {} done", m.name);
                     self.tx
                         .send(MessageType::Downloaded(Message { targets, ..m }))
@@ -142,7 +144,7 @@ impl Worker {
 #[derive(Debug, Clone)]
 struct Message {
     name: String,
-    file_id: u64,
+    file_id: Option<u64>,
     transfer_id: u64,
     targets: Option<Vec<DownloadTarget>>,
 }
@@ -152,7 +154,7 @@ impl From<&PutIOTransfer> for Message {
         Self {
             transfer_id: transfer.id,
             name: transfer.name.clone(),
-            file_id: transfer.file_id.unwrap(),
+            file_id: transfer.file_id,
             targets: None,
         }
     }
