@@ -102,6 +102,7 @@ async fn main() -> Result<()> {
                 .await
                 .unwrap();
 
+            info!("Starting web server at http://{}:{}", config.bind_address, config.port);
             HttpServer::new(move || {
                 App::new()
                     // .wrap(Logger::new(
