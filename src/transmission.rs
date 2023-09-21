@@ -40,7 +40,7 @@ impl Default for TransmissionConfig {
             rpc_version: String::from("18"),
             version: String::from("14.0.0"),
             download_dir: String::from("/"),
-            seed_ratio_limit: 2.0,
+            seed_ratio_limit: 1.0,
             seed_ratio_limited: true,
             idle_seeding_limit: 100,
             idle_seeding_limit_enabled: false,
@@ -49,36 +49,24 @@ impl Default for TransmissionConfig {
 }
 
 #[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct TransmissionTorrent {
     pub id: u64,
-    #[serde(rename(serialize = "hashString"))]
     pub hash_string: String,
     pub name: String,
-    #[serde(rename(serialize = "downloadDir"))]
     pub download_dir: String,
-    #[serde(rename(serialize = "totalSize"))]
     pub total_size: i64,
-    #[serde(rename(serialize = "leftUntilDone"))]
     pub left_until_done: i64,
-    #[serde(rename(serialize = "isFinished"))]
     pub is_finished: bool,
     pub eta: u64,
     pub status: TransmissionTorrentStatus,
-    #[serde(rename(serialize = "secondsDownloading"))]
     pub seconds_downloading: i64,
-    #[serde(rename(serialize = "errorString"))]
     pub error_string: Option<String>,
-    #[serde(rename(serialize = "downloadedEver"))]
     pub downloaded_ever: i64,
-    #[serde(rename(serialize = "seedRatioLimit"))]
     pub seed_ratio_limit: f32,
-    #[serde(rename(serialize = "seedRatioMode"))]
     pub seed_ratio_mode: u32,
-    #[serde(rename(serialize = "seedIdleLimit"))]
     pub seed_idle_limit: u64,
-    #[serde(rename(serialize = "seedIdleMode"))]
     pub seed_idle_mode: u32,
-    #[serde(rename(serialize = "fileCount"))]
     pub file_count: u32,
 }
 

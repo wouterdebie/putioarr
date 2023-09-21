@@ -1,6 +1,5 @@
 use crate::{
     handlers::{handle_torrent_add, handle_torrent_get, handle_torrent_remove},
-    putio,
     transmission::{TransmissionConfig, TransmissionRequest, TransmissionResponse},
     AppData,
 };
@@ -10,8 +9,10 @@ use actix_web::{
     post, web, HttpRequest, HttpResponse,
 };
 use actix_web_httpauth::headers::authorization::{Authorization, Basic};
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use serde_json::json;
+
+const SESSION_ID: &str = "useless-session-id";
 
 #[post("/transmission/rpc")]
 pub(crate) async fn rpc_post(
@@ -22,10 +23,10 @@ pub(crate) async fn rpc_post(
     let putio_api_token = &app_data.config.putio.api_key;
 
     // Not sure if necessary since we might just look at the session id.
-    if validate_user(req).await.is_err() {
+    if validate_user(req, &app_data).await.is_err() {
         return HttpResponse::Conflict()
             .content_type(ContentType::json())
-            .insert_header(("X-Transmission-Session-Id", "useless-session-id"))
+            .insert_header(("X-Transmission-Session-Id", SESSION_ID))
             .body("");
     }
 
@@ -54,20 +55,26 @@ pub(crate) async fn rpc_post(
 
 /// Pretty much only used for authentication.
 #[get("/transmission/rpc")]
-async fn rpc_get(req: HttpRequest) -> HttpResponse {
-    if validate_user(req).await.is_err() {
+async fn rpc_get(req: HttpRequest, app_data: web::Data<AppData>) -> HttpResponse {
+    if validate_user(req, &app_data).await.is_err() {
         return HttpResponse::Forbidden().body("forbidden");
     }
 
     HttpResponse::Conflict()
         .content_type(ContentType::json())
-        .insert_header(("X-Transmission-Session-Id", "useless-session-id"))
+        .insert_header(("X-Transmission-Session-Id", SESSION_ID))
         .body("")
     // HttpResponse::Ok().body("Hello world!")
 }
-async fn validate_user(req: HttpRequest) -> Result<()> {
+async fn validate_user(req: HttpRequest, app_data: &web::Data<AppData>) -> Result<()> {
+
     let auth = Authorization::<Basic>::parse(&req)?;
-    let api_key = auth.as_ref().password().context("No password given")?;
-    putio::account_info(api_key).await?;
-    Ok(())
+    let user_username = auth.as_ref().user_id();
+    let user_password = auth.as_ref().password().context("No password given")?;
+    if user_username == app_data.config.username && user_password == app_data.config.password {
+        Ok(())
+    } else {
+        bail!("Username or password mismatch")
+    }
+
 }

@@ -10,7 +10,8 @@ use log::info;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tokio::time::sleep;
-// mod appdata;
+
+mod arr;
 mod downloader;
 mod handlers;
 mod oob;
@@ -42,11 +43,14 @@ struct RunArgs {
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Config {
+    username: String,
+    password: String,
     bind_address: String,
     port: u16,
     loglevel: String,
     download_directory: String,
     uid: u32,
+    polling_interval: u64,
     putio: PutioConfig,
     sonarr: Option<ArrConfig>,
     radarr: Option<ArrConfig>,
@@ -77,9 +81,10 @@ async fn main() -> Result<()> {
         Commands::Run(args) => {
             let config: Config = Figment::new()
                 .join(Serialized::default("bind_address", "0.0.0.0"))
-                .join(Serialized::default("port", 7070))
+                .join(Serialized::default("port", 9091))
                 .join(Serialized::default("loglevel", "info"))
                 .join(Serialized::default("uid", 1000))
+                .join(Serialized::default("polling_interval", 10))
                 .merge(Toml::file(&args.config_path))
                 .extract()?;
 

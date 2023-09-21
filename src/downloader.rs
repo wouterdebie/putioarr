@@ -1,4 +1,5 @@
 use crate::{
+    arr,
     putio::{self, PutIOTransfer},
     AppData,
 };
@@ -8,9 +9,10 @@ use async_channel::{Receiver, Sender};
 use async_recursion::async_recursion;
 use file_owner::PathExt;
 use futures::StreamExt;
-use log::info;
+use log::{debug, info};
+use nix::unistd::Uid;
 use serde::{Deserialize, Serialize};
-use std::{fs, os::unix::prelude::MetadataExt, path::Path, time::Duration};
+use std::{fs, path::Path, time::Duration};
 use tokio::{fs::metadata, time::sleep};
 
 static NUM_WORKERS: usize = 10;
@@ -32,23 +34,28 @@ pub async fn start_download_system(app_data: Data<AppData>) -> Result<()> {
 
 // Check for new putio transfers and if they qualify, send them on for download
 async fn produce_transfers(app_data: Data<AppData>, tx: Sender<MessageType>) -> Result<()> {
-    let ten_seconds = std::time::Duration::from_secs(10);
+    let ten_seconds = std::time::Duration::from_secs(app_data.config.polling_interval);
     let mut seen = Vec::<u64>::new();
 
-    // Restore state
-    // if seeding or completed
-    //     if is_imported => send Imported
-    //     else if is_downloaded => send Downloaded
-    //     else => send QueueForDownload
-    //     add to seen
-    info!("Restoring state");
+    info!("Checking if there are unfinished transfers.");
+    // We only need to check if something has been imported. Just by looking at the filesystem we
+    // can't determine if a transfer has been imported and removed or hasn't been downloaded.
+    // This avoids downloading a tranfer that has already been imported. In case there is a download,
+    // but it wasn't (completely) imported, we will attempt a (partial) download. Files that have
+    // been completed downloading will be skipped.
     for transfer in &putio::list_transfers(&app_data.config.putio.api_key)
         .await?
         .transfers
     {
-        let msg: Message = transfer.into();
+        let mut message: Message = transfer.into();
         if transfer.is_downloadable() {
-            // Get download targets
+            let targets = get_download_targets(&app_data, message.file_id).await?;
+            message.targets = Some(targets);
+            if is_imported(&app_data, &message).await {
+                info!("{} already imported. Notifying of import.", &message.name);
+                seen.push(message.transfer_id);
+                tx.send(MessageType::Imported(message)).await?;
+            }
         }
     }
 
@@ -58,7 +65,7 @@ async fn produce_transfers(app_data: Data<AppData>, tx: Sender<MessageType>) -> 
             .transfers;
 
         if !transfers.is_empty() {
-            info!("Active transfers: {}", transfers.len());
+            debug!("Active transfers: {:?}", transfers);
         }
         for transfer in &transfers {
             if seen.contains(&transfer.id) || transfer.is_downloadable() {
@@ -107,6 +114,7 @@ impl Worker {
     async fn work(&self) -> Result<()> {
         loop {
             let msg = self.rx.recv().await?;
+            let app_data = self.app_data.clone();
             match msg {
                 MessageType::QueuedForDownload(m) => {
                     info!("Downloading {}", m.name);
@@ -119,12 +127,12 @@ impl Worker {
                 MessageType::Downloaded(m) => {
                     info!("Watching imports {}", m.name);
                     let tx = self.tx.clone();
-                    actix_rt::spawn(async { watch_for_import(tx, m).await });
+                    actix_rt::spawn(async { watch_for_import(app_data, tx, m).await });
                 }
                 MessageType::Imported(m) => {
                     info!("Watching seeding {}", m.name);
-                    let data = self.app_data.clone();
-                    actix_rt::spawn(async { watch_seeding(data, m).await });
+
+                    actix_rt::spawn(async { watch_seeding(app_data, m).await });
                 }
             }
         }
@@ -157,9 +165,13 @@ enum MessageType {
     Imported(Message),
 }
 
-async fn watch_for_import(tx: Sender<MessageType>, message: Message) -> Result<()> {
+async fn watch_for_import(
+    app_data: Data<AppData>,
+    tx: Sender<MessageType>,
+    message: Message,
+) -> Result<()> {
     loop {
-        if is_imported(&message) {
+        if is_imported(&app_data, &message).await {
             info!("{} has been imported. Deleting files.", message.name);
             let targets = &message.targets.clone().unwrap();
             let top_level_path = get_top_level(targets);
@@ -182,27 +194,48 @@ async fn watch_for_import(tx: Sender<MessageType>, message: Message) -> Result<(
 
             break;
         }
-        sleep(Duration::from_secs(10)).await;
+        sleep(Duration::from_secs(app_data.config.polling_interval)).await;
     }
     info!("{} deleted. Stop watching.", message.name);
     Ok(())
 }
 
-fn is_imported(message: &Message) -> bool {
-    all_targets_hardlinked(&message.targets.as_ref().unwrap().clone())
+async fn is_imported(app_data: &Data<AppData>, message: &Message) -> bool {
+    let targets = &message.targets.as_ref().unwrap().clone();
+    // all_targets_hardlinked(targets);
+    all_targets_imported(app_data, targets).await
 }
 
-fn all_targets_hardlinked(targets: &[DownloadTarget]) -> bool {
-    let results = targets
+async fn all_targets_imported(app_data: &Data<AppData>, targets: &[DownloadTarget]) -> bool {
+    let mut check_services = Vec::<(&str, String, String)>::new();
+    if let Some(a) = &app_data.config.sonarr {
+        check_services.push(("Sonarr", a.url.clone(), a.api_key.clone()))
+    }
+    if let Some(a) = &app_data.config.radarr {
+        check_services.push(("Radarr", a.url.clone(), a.api_key.clone()))
+    }
+
+    let paths = targets
         .iter()
         .filter(|t| t.target_type == DownloadType::File)
         .map(|t| t.to.clone())
-        .map(|s| {
-            let meta = fs::metadata(s).unwrap();
-            let links = meta.nlink();
-            links > 1
-        })
-        .collect::<Vec<bool>>();
+        .collect::<Vec<String>>();
+
+    let mut results = Vec::<bool>::new();
+    for path in paths {
+        info!("Checking if {} has been imported yet", &path);
+        let mut service_results = vec![];
+        for (service_name, url, key) in &check_services {
+            let service_result = arr::is_imported(&path, key, url).await.unwrap();
+            if service_result {
+                info!("Found {} imported by {}", &path, service_name);
+            }
+            service_results.push(service_result)
+        }
+        // Check if ANY of the service_results are true and put the outcome in results
+        results.push(service_results.into_iter().any(|x| x));
+    }
+    // Check if all targets have been imported
     results.into_iter().all(|x| x)
 }
 
@@ -224,7 +257,7 @@ async fn watch_seeding(app_data: Data<AppData>, message: Message) -> Result<()> 
             break;
         }
     }
-    sleep(Duration::from_secs(10)).await;
+    sleep(Duration::from_secs(app_data.config.polling_interval)).await;
 
     info!("{} removed. Stop watching.", message.name);
     Ok(())
@@ -232,7 +265,7 @@ async fn watch_seeding(app_data: Data<AppData>, message: Message) -> Result<()> 
 
 /// Downloads all files belonging to a file_id
 async fn download(app_data: &Data<AppData>, file_id: u64) -> Result<Vec<DownloadTarget>> {
-    let targets = get_download_targets(app_data, file_id, None, true).await?;
+    let targets = get_download_targets(app_data, file_id).await?;
     download_targets(&targets, app_data).await?;
 
     // TODO: Cleanup when stuff goes bad
@@ -245,24 +278,35 @@ async fn download_targets(targets: &Vec<DownloadTarget>, app_data: &Data<AppData
             DownloadType::Directory => {
                 if !Path::new(&target.to).exists() {
                     fs::create_dir(&target.to)?;
-                    target.to.clone().set_owner(app_data.config.uid)?;
+                    if Uid::effective().is_root() {
+                        target.to.clone().set_owner(app_data.config.uid)?;
+                    }
                 }
             }
             DownloadType::File => {
                 // Delete file if already exists
-                if Path::new(&target.to).exists() {
-                    fs::remove_file(&target.to)?;
+                if !Path::new(&target.to).exists() {
+                    let url = target.from.clone().context("No URL found")?;
+                    fetch(&url, &target.to, app_data.config.uid).await?
+                } else {
+                    info!("{} already exists. Skipping download.", &target.to);
+                    // fs::remove_file(&target.to)?;
                 }
-                let url = target.from.clone().context("No URL found")?;
-                fetch(&url, &target.to, app_data.config.uid).await?
             }
         }
     }
     Ok(())
 }
 
-#[async_recursion]
 async fn get_download_targets(
+    app_data: &Data<AppData>,
+    file_id: u64,
+) -> Result<Vec<DownloadTarget>> {
+    recurse_download_targets(app_data, file_id, None, true).await
+}
+
+#[async_recursion]
+async fn recurse_download_targets(
     app_data: &Data<AppData>,
     file_id: u64,
     override_base_path: Option<String>,
@@ -288,7 +332,7 @@ async fn get_download_targets(
             let new_base = format!("{}/", &target);
             for file in response.files {
                 targets.append(
-                    &mut get_download_targets(app_data, file.id, Some(new_base.clone()), false)
+                    &mut recurse_download_targets(app_data, file.id, Some(new_base.clone()), false)
                         .await?,
                 );
             }
@@ -332,7 +376,10 @@ async fn fetch(url: &str, to: &str, uid: u32) -> Result<()> {
     while let Some(item) = byte_stream.next().await {
         tokio::io::copy(&mut item?.as_ref(), &mut tmp_file).await?;
     }
-    tmp_path.clone().set_owner(uid)?;
+    if Uid::effective().is_root() {
+        tmp_path.clone().set_owner(uid)?;
+    }
+
     fs::rename(&tmp_path, to)?;
     info!("Downloading {} finished...", &to);
     Ok(())

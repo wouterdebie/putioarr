@@ -29,6 +29,7 @@ pub(crate) async fn handle_torrent_add(
     info!("Torrent uploaded");
     None
 }
+
 pub(crate) async fn handle_torrent_remove(
     api_token: &str,
     payload: &web::Json<TransmissionRequest>,

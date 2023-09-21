@@ -33,7 +33,7 @@ pub struct PutIOTransfer {
 
 impl PutIOTransfer {
     pub fn is_downloadable(&self) -> bool {
-        self.file_id.is_none()
+        self.file_id.is_some()
     }
 }
 
@@ -48,18 +48,6 @@ pub struct Info {
     pub username: String,
     pub mail: String,
     pub monthly_bandwidth_usage: u64,
-}
-
-pub async fn account_info(api_token: &str) -> Result<AccountInfoResponse> {
-    let client = reqwest::Client::new();
-    let response: AccountInfoResponse = client
-        .get("https://api.put.io/v2/account/info")
-        .header("authorization", format!("Bearer {}", api_token))
-        .send()
-        .await?
-        .json()
-        .await?;
-    Ok(response)
 }
 
 #[derive(Debug, Deserialize)]
