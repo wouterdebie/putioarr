@@ -58,7 +58,7 @@ async fn produce_transfers(app_data: Data<AppData>, tx: Sender<MessageType>) -> 
             }
         }
     }
-
+    info!("Done checking for unfinished transfers.");
     loop {
         let transfers = putio::list_transfers(&app_data.config.putio.api_key)
             .await?
