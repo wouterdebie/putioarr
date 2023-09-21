@@ -340,7 +340,11 @@ async fn recurse_download_targets(
 
     match response.parent.file_type.as_str() {
         "FOLDER" => {
-            if &response.parent.name.to_lowercase() != "sample" {
+            if !app_data
+                .config
+                .skip_directories
+                .contains(&response.parent.name.to_lowercase())
+            {
                 let new_base_path = to.clone();
 
                 targets.push(DownloadTarget {

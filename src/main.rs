@@ -51,6 +51,7 @@ pub struct Config {
     download_directory: String,
     uid: u32,
     polling_interval: u64,
+    skip_directories: Vec<String>,
     putio: PutioConfig,
     sonarr: Option<ArrConfig>,
     radarr: Option<ArrConfig>,
@@ -85,6 +86,10 @@ async fn main() -> Result<()> {
                 .join(Serialized::default("loglevel", "info"))
                 .join(Serialized::default("uid", 1000))
                 .join(Serialized::default("polling_interval", 10))
+                .join(Serialized::default(
+                    "skip_directories",
+                    vec!["sample", "extras"],
+                ))
                 .merge(Toml::file(&args.config_path))
                 .extract()?;
 
@@ -102,7 +107,10 @@ async fn main() -> Result<()> {
                 .await
                 .unwrap();
 
-            info!("Starting web server at http://{}:{}", config.bind_address, config.port);
+            info!(
+                "Starting web server at http://{}:{}",
+                config.bind_address, config.port
+            );
             HttpServer::new(move || {
                 App::new()
                     // .wrap(Logger::new(

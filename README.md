@@ -46,6 +46,9 @@ uid = 1000
 # Optional polling interval in secs, default 10.
 polling_interval = 10
 
+# Optional skip directories when downloding, default ["sample", "extras"]
+skip_directories = ["sample", "extras"]
+
 [putio]
 api_key =  "MYPUTIOKEY"
 
@@ -67,10 +70,8 @@ api_key = "MYRADARRAPIKEY"
 - The session ID provided is hard coded. Not sure if it matters.
 - (Add option to not delete downloads)
 - Docker image
-- Figure out a better way to map a transfer to a completed import. Since a transfer can contain multiple files (e.g. a whole season) we currently check if all video files have been imported. Most of the time this is fine, except when there are sample videos. Sonarr/radarr will not import samples, but will make no mention of the fact that the sample was skipped. Right now we only check if there are any directories named "sample" (case insensitive) and just skip them for download alltogether, but this might not be enough. Future options:
-    - Let the user keep a list of directories that can be skipped
-    - Let the user keep a list of regexes that can be skipped. This is potentially dangerous, since this might lead to false positives.
-
+- Figure out a better way to map a transfer to a completed import. Since a transfer can contain multiple files (e.g. a whole season) we currently check if all video files have been imported. Most of the time this is fine, except when there are sample videos. Sonarr/radarr will not import samples, but will make no mention of the fact that the sample was skipped. Right now we check against the `skip_directories` list, which works, but might be tedious.
+- Automatically pick the right putio proxy based on speed
 
 ## Thanks
 Thanks to [davidchalifoux](https://github.com/davidchalifoux) for borrowed code from kaput-cli.
