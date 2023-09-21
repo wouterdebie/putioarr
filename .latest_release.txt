@@ -1,2 +1,4 @@
-# 0.3.4
-Adds extra log message
+# 0.3.5
+Fixes some path bug and removes remote files when all is done
+
+Adds deploy script
