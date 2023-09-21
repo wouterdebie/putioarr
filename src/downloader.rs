@@ -255,7 +255,21 @@ async fn watch_seeding(app_data: Data<AppData>, message: Message) -> Result<()> 
                 "Transfer {} is no longer seeding. Removing..",
                 transfer.name
             );
+
             putio::remove_transfer(&app_data.config.putio.api_key, message.transfer_id).await?;
+            match putio::remove_files(&app_data.config.putio.api_key, message.file_id.unwrap())
+                .await
+            {
+                Ok(_) => {
+                    info!("Removed remote files for {}", message.name);
+                }
+                Err(_) => {
+                    info!(
+                        "Unable to remove remove files for {}. Ignoring.",
+                        message.name
+                    );
+                }
+            };
             break;
         }
     }
@@ -279,6 +293,7 @@ async fn download_targets(targets: &Vec<DownloadTarget>, app_data: &Data<AppData
         match target.target_type {
             DownloadType::Directory => {
                 if !Path::new(&target.to).exists() {
+                    info!("Creating dir {}", &target.to);
                     fs::create_dir(&target.to)?;
                     if Uid::effective().is_root() {
                         target.to.clone().set_owner(app_data.config.uid)?;
@@ -318,35 +333,39 @@ async fn recurse_download_targets(
     let mut targets = Vec::<DownloadTarget>::new();
     let response = putio::list_files(&app_data.config.putio.api_key, file_id).await?;
 
+    let to = Path::new(&base_path)
+        .join(&response.parent.name)
+        .to_string_lossy()
+        .to_string();
+
     match response.parent.file_type.as_str() {
         "FOLDER" => {
-            let target = Path::new(&app_data.config.download_directory)
-                .join(&response.parent.name)
-                .to_string_lossy()
-                .to_string();
+            if &response.parent.name.to_lowercase() != "sample" {
+                let new_base_path = to.clone();
 
-            targets.push(DownloadTarget {
-                from: None,
-                target_type: DownloadType::Directory,
-                to: target.clone(),
-                top_level,
-            });
-            let new_base = format!("{}/", &target);
-            for file in response.files {
-                targets.append(
-                    &mut recurse_download_targets(app_data, file.id, Some(new_base.clone()), false)
+                targets.push(DownloadTarget {
+                    from: None,
+                    target_type: DownloadType::Directory,
+                    to,
+                    top_level,
+                });
+
+                for file in response.files {
+                    targets.append(
+                        &mut recurse_download_targets(
+                            app_data,
+                            file.id,
+                            Some(new_base_path.clone()),
+                            false,
+                        )
                         .await?,
-                );
+                    );
+                }
             }
         }
         "VIDEO" => {
             // Get download URL for file
             let url = putio::url(&app_data.config.putio.api_key, response.parent.id).await?;
-
-            let to = Path::new(&base_path)
-                .join(&response.parent.name)
-                .to_string_lossy()
-                .to_string();
 
             targets.push(DownloadTarget {
                 from: Some(url),

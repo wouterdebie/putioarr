@@ -62,7 +62,7 @@ api_key = "MYRADARRAPIKEY"
 ```
 
 ## TODO:
-- Better Error handling
+- Better Error handling and retry behavior
 - Multi-threaded downloads
 - The session ID provided is hard coded. Not sure if it matters.
 - (Add option to not delete downloads)

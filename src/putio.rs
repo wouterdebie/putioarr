@@ -98,6 +98,19 @@ pub async fn remove_transfer(api_token: &str, id: u64) -> Result<()> {
     Ok(())
 }
 
+pub async fn remove_files(api_token: &str, id: u64) -> Result<()> {
+    let client = reqwest::Client::new();
+    let form = multipart::Form::new().text("file_ids", id.to_string());
+    client
+        .post("https://api.put.io/v2/files/delete")
+        .multipart(form)
+        .header("authorization", format!("Bearer {}", api_token))
+        .send()
+        .await?;
+
+    Ok(())
+}
+
 pub async fn add_transfer(api_token: &str, url: &str) -> Result<()> {
     let client = reqwest::Client::new();
     let form = multipart::Form::new().text("url", url.to_string());
