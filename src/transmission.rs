@@ -52,7 +52,7 @@ impl Default for TransmissionConfig {
 #[serde(rename_all = "camelCase")]
 pub struct TransmissionTorrent {
     pub id: u64,
-    pub hash_string: String,
+    pub hash_string: Option<String>,
     pub name: String,
     pub download_dir: String,
     pub total_size: i64,

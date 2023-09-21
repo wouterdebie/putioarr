@@ -17,7 +17,7 @@ pub struct PutIOAccountResponse {
 #[derive(Debug, Deserialize)]
 pub struct PutIOTransfer {
     pub id: u64,
-    pub hash: String,
+    pub hash: Option<String>,
     pub name: String,
     pub size: Option<i64>,
     pub downloaded: Option<i64>,

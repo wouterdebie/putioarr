@@ -34,7 +34,7 @@ pub(crate) async fn handle_torrent_remove(
     api_token: &str,
     payload: &web::Json<TransmissionRequest>,
 ) -> Option<serde_json::Value> {
-    // Cleanup all the unwrap stuff
+    // TODO: leanup all the unwrap stuff
     let arguments = payload.arguments.as_ref().unwrap().as_object().unwrap();
     let ids: Vec<&str> = arguments
         .get("ids")
@@ -55,7 +55,7 @@ pub(crate) async fn handle_torrent_remove(
         .unwrap()
         .transfers
         .into_iter()
-        .filter(|t| ids.contains(&t.hash.as_str()))
+        .filter(|t| ids.contains(&t.hash.clone().unwrap_or(String::from("no_hash")).as_str()))
         .collect();
 
     for t in putio_transfers {

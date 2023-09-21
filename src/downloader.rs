@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use async_channel::{Receiver, Sender};
 use async_recursion::async_recursion;
 use file_owner::PathExt;
-use futures::StreamExt;
+use futures::{stream, StreamExt};
 use log::{debug, info};
 use nix::unistd::Uid;
 use serde::{Deserialize, Serialize};
@@ -289,26 +289,33 @@ async fn download(app_data: &Data<AppData>, file_id: u64) -> Result<Vec<Download
 }
 
 async fn download_targets(targets: &Vec<DownloadTarget>, app_data: &Data<AppData>) -> Result<()> {
-    for target in targets {
-        match target.target_type {
-            DownloadType::Directory => {
-                if !Path::new(&target.to).exists() {
-                    info!("Creating dir {}", &target.to);
-                    fs::create_dir(&target.to)?;
-                    if Uid::effective().is_root() {
-                        target.to.clone().set_owner(app_data.config.uid)?;
-                    }
+    stream::iter(targets)
+        .for_each_concurrent(4, |target| async move {
+            download_target(app_data, target).await.unwrap();
+        })
+        .await;
+    Ok(())
+}
+
+async fn download_target(app_data: &Data<AppData>, target: &DownloadTarget) -> Result<()> {
+    match target.target_type {
+        DownloadType::Directory => {
+            if !Path::new(&target.to).exists() {
+                info!("Creating dir {}", &target.to);
+                fs::create_dir(&target.to)?;
+                if Uid::effective().is_root() {
+                    target.to.clone().set_owner(app_data.config.uid)?;
                 }
             }
-            DownloadType::File => {
-                // Delete file if already exists
-                if !Path::new(&target.to).exists() {
-                    let url = target.from.clone().context("No URL found")?;
-                    fetch(&url, &target.to, app_data.config.uid).await?
-                } else {
-                    info!("{} already exists. Skipping download.", &target.to);
-                    // fs::remove_file(&target.to)?;
-                }
+        }
+        DownloadType::File => {
+            // Delete file if already exists
+            if !Path::new(&target.to).exists() {
+                let url = target.from.clone().context("No URL found")?;
+                fetch(&url, &target.to, app_data.config.uid).await?
+            } else {
+                info!("{} already exists. Skipping download.", &target.to);
+                // fs::remove_file(&target.to)?;
             }
         }
     }
