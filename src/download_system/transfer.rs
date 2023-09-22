@@ -81,9 +81,11 @@ impl Transfer {
     }
 
     pub fn from(app_data: Data<AppData>, transfer: &PutIOTransfer) -> Self {
+        let default = &"Unknown".to_string();
+        let name = transfer.name.as_ref().unwrap_or(default);
         Self {
             transfer_id: transfer.id,
-            name: transfer.name.clone(),
+            name: name.clone(),
             file_id: transfer.file_id,
             targets: None,
             hash: transfer.hash.clone(),

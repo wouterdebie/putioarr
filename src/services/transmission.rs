@@ -72,16 +72,23 @@ pub struct TransmissionTorrent {
 
 impl From<PutIOTransfer> for TransmissionTorrent {
     fn from(t: PutIOTransfer) -> Self {
+
+        let s = match t.started_at {
+            Some(t) => t,
+            None => Utc::now().format("%FT%T").to_string(),
+        };
+
         let started_at = Utc
-            .from_local_datetime(&NaiveDateTime::parse_from_str(&t.started_at, "%FT%T").unwrap())
+            .from_local_datetime(&NaiveDateTime::parse_from_str(&s, "%FT%T").unwrap())
             .unwrap();
         let now = Utc::now();
         let seconds_downloading = (now - started_at).num_seconds();
-
+        let default = &"Unknown".to_string();
+        let name = t.name.as_ref().unwrap_or(default);
         Self {
             id: t.id,
             hash_string: t.hash,
-            name: t.name,
+            name: name.clone(),
             download_dir: String::from(""),
             total_size: t.size.unwrap_or(0),
             left_until_done: max(t.size.unwrap_or(0) - t.downloaded.unwrap_or(0), 0),

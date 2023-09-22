@@ -1,4 +1,1 @@
-# 0.4.2
-Structured and colored logging
-
-Update readme
+# 0.4.3
