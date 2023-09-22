@@ -3,12 +3,14 @@ use crate::{
         download::{DownloadDoneStatus, DownloadTargetMessage},
         transfer::Transfer,
     },
-    AppData, services::putio,
+    services::putio,
+    AppData,
 };
 use actix_web::web::Data;
 use anyhow::Result;
 use async_channel::{Receiver, Sender};
-use log::info;
+use colored::*;
+use log::{info, warn};
 use std::{fs, time::Duration};
 use tokio::{fs::metadata, time::sleep};
 
@@ -47,7 +49,7 @@ impl Worker {
             let app_data = self.app_data.clone();
             match msg {
                 TransferMessage::QueuedForDownload(t) => {
-                    info!("Downloading {}", t.name);
+                    info!("{}: download {}", t, "started".yellow());
                     let targets = t.get_download_targets().await?;
                     // Create a communications channel for the download worker to communicate status back.
                     let done_channels: &Vec<(
@@ -66,11 +68,12 @@ impl Worker {
                     }
 
                     // Wait for all the workers having sent back their status.
+                    // TODO: Some better error handling
                     for (_, done_rx) in done_channels {
                         done_rx.recv().await?;
                     }
 
-                    info!("Downloading {} done", t.name);
+                    info!("{}: download {}", t, "done".blue());
                     self.tx
                         .send(TransferMessage::Downloaded(Transfer {
                             targets: Some(targets),
@@ -78,15 +81,12 @@ impl Worker {
                         }))
                         .await?;
                 }
-                TransferMessage::Downloaded(m) => {
-                    info!("Watching imports {}", m.name);
+                TransferMessage::Downloaded(t) => {
                     let tx = self.tx.clone();
-                    actix_rt::spawn(async { watch_for_import(app_data, tx, m).await });
+                    actix_rt::spawn(async { watch_for_import(app_data, tx, t).await });
                 }
-                TransferMessage::Imported(m) => {
-                    info!("Watching seeding {}", m.name);
-
-                    actix_rt::spawn(async { watch_seeding(app_data, m).await });
+                TransferMessage::Imported(t) => {
+                    actix_rt::spawn(async { watch_seeding(app_data, t).await });
                 }
             }
         }
@@ -98,22 +98,23 @@ async fn watch_for_import(
     tx: Sender<TransferMessage>,
     transfer: Transfer,
 ) -> Result<()> {
+    info!("{}: watching imports", transfer);
     loop {
         if transfer.is_imported().await {
-            info!("{} has been imported. Deleting files.", transfer.name);
-            let top_level_path = transfer.get_top_level();
+            info!("{}: imported", transfer);
+            let top_level_target = transfer.get_top_level();
 
-            match metadata(&top_level_path).await {
+            match metadata(&top_level_target.to).await {
                 Ok(m) if m.is_dir() => {
-                    info!("Deleting everyting in {}", &top_level_path);
-                    fs::remove_dir_all(top_level_path).unwrap();
+                    fs::remove_dir_all(&top_level_target.to).unwrap();
+                    info!("{}: deleted", &top_level_target);
                 }
                 Ok(m) if m.is_file() => {
-                    info!("Deleting {}", &top_level_path);
-                    fs::remove_file(top_level_path).unwrap();
+                    fs::remove_file(&top_level_target.to).unwrap();
+                    info!("{}: deleted", &top_level_target);
                 }
                 Ok(_) | Err(_) => {
-                    panic!("Don't know how to handle {}", &top_level_path)
+                    panic!("{}: no idea how to handle", &top_level_target)
                 }
             };
             let m = transfer.clone();
@@ -123,34 +124,29 @@ async fn watch_for_import(
         }
         sleep(Duration::from_secs(app_data.config.polling_interval)).await;
     }
-    info!("{} deleted. Stop watching.", transfer.name);
+    info!("{}: removed", transfer);
     Ok(())
 }
 
 async fn watch_seeding(app_data: Data<AppData>, transfer: Transfer) -> Result<()> {
+    info!("{}: watching seeding", transfer);
     loop {
         let putio_transfer =
             putio::get_transfer(&app_data.config.putio.api_key, transfer.transfer_id)
                 .await?
                 .transfer;
         if putio_transfer.status != "SEEDING" {
-            info!(
-                "put.io transfer {} is no longer seeding. Removing..",
-                putio_transfer.name
-            );
-
+            info!("{}: stopped seeding", transfer);
             putio::remove_transfer(&app_data.config.putio.api_key, transfer.transfer_id).await?;
-            match putio::remove_files(&app_data.config.putio.api_key, transfer.file_id.unwrap())
+            info!("{}: removed from put.io", transfer);
+            match putio::delete_file(&app_data.config.putio.api_key, transfer.file_id.unwrap())
                 .await
             {
                 Ok(_) => {
-                    info!("Removed remote files for {}", transfer.name);
+                    info!("{}: deleted remote files", transfer);
                 }
                 Err(_) => {
-                    info!(
-                        "Unable to remove remove files for {}. Ignoring.",
-                        transfer.name
-                    );
+                    warn!("{}: unable to delete remote files", transfer);
                 }
             };
             break;
@@ -158,6 +154,6 @@ async fn watch_seeding(app_data: Data<AppData>, transfer: Transfer) -> Result<()
     }
     sleep(Duration::from_secs(app_data.config.polling_interval)).await;
 
-    info!("{} removed. Stop watching.", transfer.name);
+    info!("{}: done seeding", transfer);
     Ok(())
 }

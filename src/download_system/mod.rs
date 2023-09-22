@@ -1,4 +1,4 @@
-use crate::{services::putio::produce_transfers, AppData};
+use crate::AppData;
 use actix_web::web::Data;
 use anyhow::Result;
 
@@ -11,7 +11,7 @@ pub async fn start(app_data: Data<AppData>) -> Result<()> {
     let (download_sender, download_receiver) = async_channel::unbounded();
     let data = app_data.clone();
     let tx = sender.clone();
-    actix_rt::spawn(async { produce_transfers(data, tx).await });
+    actix_rt::spawn(async { transfer::produce_transfers(data, tx).await });
 
     for id in 0..app_data.config.orchestration_workers {
         let data = app_data.clone();

@@ -5,14 +5,18 @@ use crate::{
     AppData,
 };
 use actix_web::web;
+use anyhow::Result;
 use base64::Engine;
+use colored::Colorize;
+use lava_torrent::torrent::v1::Torrent;
 use log::info;
+use magnet_url::Magnet;
 use serde_json::json;
 
 pub(crate) async fn handle_torrent_add(
     api_token: &str,
     payload: &web::Json<TransmissionRequest>,
-) -> Option<serde_json::Value> {
+) -> Result<Option<serde_json::Value>> {
     let arguments = payload.arguments.as_ref().unwrap().as_object().unwrap();
     if arguments.contains_key("metainfo") {
         // .torrent files
@@ -20,14 +24,35 @@ pub(crate) async fn handle_torrent_add(
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(b64)
             .unwrap();
-        putio::upload_file(api_token, bytes).await.unwrap();
+        putio::upload_file(api_token, &bytes).await?;
+
+        match Torrent::read_from_bytes(bytes) {
+            Ok(t) => {
+                // let name = t.name;
+                info!(
+                    "{}: torrent uploaded",
+                    format!("[ffff: {}]", t.name).magenta()
+                );
+            }
+            Err(_) => info!("New torrent uploaded"),
+        };
     } else {
         // Magnet links
-        let url = arguments["filename"].as_str().unwrap();
-        putio::add_transfer(api_token, url).await.unwrap();
+        let magnet_url = arguments["filename"].as_str().unwrap();
+        putio::add_transfer(api_token, magnet_url).await?;
+        match Magnet::new(magnet_url) {
+            Ok(m) if m.dn.is_some() => {
+                info!(
+                    "{}: magnet link uploaded",
+                    format!("[ffff: {}]", urldecode::decode(m.dn.unwrap())).magenta()
+                );
+            }
+            _ => {
+                info!("unknown magnet link uploaded");
+            }
+        }
     };
-    info!("Torrent uploaded");
-    None
+    Ok(None)
 }
 
 pub(crate) async fn handle_torrent_remove(

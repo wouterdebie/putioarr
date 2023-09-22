@@ -1,14 +1,14 @@
+use super::transfer::{DownloadTarget, TargetType};
 use crate::AppData;
 use actix_web::web::Data;
 use anyhow::{Context, Result};
 use async_channel::{Receiver, Sender};
+use colored::*;
 use file_owner::PathExt;
 use futures::StreamExt;
-use log::info;
+use log::{error, info};
 use nix::unistd::Uid;
 use std::{fs, path::Path};
-
-use super::transfer::{DownloadTarget, TargetType};
 
 #[derive(Clone)]
 pub struct Worker {
@@ -46,31 +46,34 @@ async fn download_target(app_data: &Data<AppData>, target: &DownloadTarget) -> R
     match target.target_type {
         TargetType::Directory => {
             if !Path::new(&target.to).exists() {
-                info!("Creating dir {}", &target.to);
                 fs::create_dir(&target.to)?;
                 if Uid::effective().is_root() {
                     target.to.clone().set_owner(app_data.config.uid)?;
                 }
+                info!("{}: directory created", &target);
             }
         }
         TargetType::File => {
             // Delete file if already exists
             if !Path::new(&target.to).exists() {
-                let url = target.from.clone().context("No URL found")?;
-                fetch(&url, &target.to, app_data.config.uid).await?
+                info!("{}: download {}", &target, "started".yellow());
+                match fetch(target, app_data.config.uid).await {
+                    Ok(_) => info!("{}: download {}", &target, "succeeded".green()),
+                    Err(_) => error!("{}: download {}", &target, "failed".red()),
+                };
             } else {
-                info!("{} already exists. Skipping download.", &target.to);
-                // fs::remove_file(&target.to)?;
+                info!("{}: already exists", &target);
             }
         }
     }
     Ok(())
 }
 
-async fn fetch(url: &str, to: &str, uid: u32) -> Result<()> {
-    info!("Downloading {} started...", &to);
-    let tmp_path = format!("{}.downloading", &to);
+async fn fetch(target: &DownloadTarget, uid: u32) -> Result<()> {
+    let tmp_path = format!("{}.downloading", &target.to);
     let mut tmp_file = tokio::fs::File::create(&tmp_path).await?;
+
+    let url = target.from.clone().context("No URL found")?;
     let mut byte_stream = reqwest::get(url).await?.bytes_stream();
 
     while let Some(item) = byte_stream.next().await {
@@ -80,8 +83,8 @@ async fn fetch(url: &str, to: &str, uid: u32) -> Result<()> {
         tmp_path.clone().set_owner(uid)?;
     }
 
-    fs::rename(&tmp_path, to)?;
-    info!("Downloading {} finished...", &to);
+    fs::rename(&tmp_path, &target.to)?;
+
     Ok(())
 }
 

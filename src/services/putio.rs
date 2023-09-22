@@ -1,14 +1,7 @@
-use std::collections::HashMap;
-
-use actix_web::web::Data;
-use anyhow::Result;
-use async_channel::Sender;
-use log::{info, debug};
+use anyhow::{bail, Result};
 use reqwest::multipart;
 use serde::{Deserialize, Serialize};
-use tokio::time::sleep;
-
-use crate::{AppData, download_system::transfer::{TransferMessage, Transfer}};
+use std::collections::HashMap;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PutIOAccountInfo {
@@ -58,6 +51,21 @@ pub struct Info {
     pub monthly_bandwidth_usage: u64,
 }
 
+pub async fn account_info(api_token: &str) -> Result<AccountInfoResponse> {
+    let client = reqwest::Client::new();
+    let response = client
+        .get("https://api.put.io/v2/account/info")
+        .header("authorization", format!("Bearer {}", api_token))
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        bail!("Error getting put.io account info: {}", response.status());
+    }
+
+    Ok(response.json().await?)
+}
+
 #[derive(Debug, Deserialize)]
 pub struct ListTransferResponse {
     pub transfers: Vec<PutIOTransfer>,
@@ -71,63 +79,55 @@ pub struct GetTransferResponse {
 /// Returns the user's transfers.
 pub async fn list_transfers(api_token: &str) -> Result<ListTransferResponse> {
     let client = reqwest::Client::new();
-    let response: ListTransferResponse = client
+    let response = client
         .get("https://api.put.io/v2/transfers/list")
         .header("authorization", format!("Bearer {}", api_token))
         .send()
-        .await?
-        .json()
         .await?;
-    Ok(response)
+
+    if !response.status().is_success() {
+        bail!("Error getting put.io transfers: {}", response.status());
+    }
+
+    Ok(response.json().await?)
 }
 
-pub async fn get_transfer(api_token: &str, id: u64) -> Result<GetTransferResponse> {
+pub async fn get_transfer(api_token: &str, transfer_id: u64) -> Result<GetTransferResponse> {
     let client = reqwest::Client::new();
-    let response: GetTransferResponse = client
-        .get(format!("https://api.put.io/v2/transfers/{}", id))
+    let response = client
+        .get(format!("https://api.put.io/v2/transfers/{}", transfer_id))
         .header("authorization", format!("Bearer {}", api_token))
         .send()
-        .await?
-        .json()
         .await?;
-    Ok(response)
+
+    if !response.status().is_success() {
+        bail!(
+            "Error getting put.io transfer id:{}: {}",
+            transfer_id,
+            response.status()
+        );
+    }
+
+    Ok(response.json().await?)
 }
 
-pub async fn remove_transfer(api_token: &str, id: u64) -> Result<()> {
+pub async fn remove_transfer(api_token: &str, transfer_id: u64) -> Result<()> {
     let client = reqwest::Client::new();
-    let form = multipart::Form::new().text("transfer_ids", id.to_string());
-    client
+    let form = multipart::Form::new().text("transfer_ids", transfer_id.to_string());
+    let response = client
         .post("https://api.put.io/v2/transfers/remove")
         .multipart(form)
         .header("authorization", format!("Bearer {}", api_token))
         .send()
         .await?;
 
-    Ok(())
-}
-
-pub async fn remove_files(api_token: &str, id: u64) -> Result<()> {
-    let client = reqwest::Client::new();
-    let form = multipart::Form::new().text("file_ids", id.to_string());
-    client
-        .post("https://api.put.io/v2/files/delete")
-        .multipart(form)
-        .header("authorization", format!("Bearer {}", api_token))
-        .send()
-        .await?;
-
-    Ok(())
-}
-
-pub async fn add_transfer(api_token: &str, url: &str) -> Result<()> {
-    let client = reqwest::Client::new();
-    let form = multipart::Form::new().text("url", url.to_string());
-    client
-        .post("https://api.put.io/v2/transfers/add")
-        .multipart(form)
-        .header("authorization", format!("Bearer {}", api_token))
-        .send()
-        .await?;
+    if !response.status().is_success() {
+        bail!(
+            "Error removing put.io transfer id:{}: {}",
+            transfer_id,
+            response.status()
+        );
+    }
 
     Ok(())
 }
@@ -135,30 +135,59 @@ pub async fn add_transfer(api_token: &str, url: &str) -> Result<()> {
 pub async fn delete_file(api_token: &str, file_id: u64) -> Result<()> {
     let client = reqwest::Client::new();
     let form = multipart::Form::new().text("file_ids", file_id.to_string());
-    client
+    let response = client
         .post("https://api.put.io/v2/files/delete")
         .multipart(form)
         .header("authorization", format!("Bearer {}", api_token))
         .send()
         .await?;
 
+    if !response.status().is_success() {
+        bail!(
+            "Error removing put.io file/direcotry id:{}: {}",
+            file_id,
+            response.status()
+        );
+    }
+
     Ok(())
 }
 
-pub async fn upload_file(api_token: &str, bytes: Vec<u8>) -> Result<()> {
+pub async fn add_transfer(api_token: &str, url: &str) -> Result<()> {
     let client = reqwest::Client::new();
-    let file_part = multipart::Part::bytes(bytes).file_name("foo.torrent");
+    let form = multipart::Form::new().text("url", url.to_string());
+    let response = client
+        .post("https://api.put.io/v2/transfers/add")
+        .multipart(form)
+        .header("authorization", format!("Bearer {}", api_token))
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        bail!("Error adding url: {} to put.io: {}", url, response.status());
+    }
+
+    Ok(())
+}
+
+pub async fn upload_file(api_token: &str, bytes: &[u8]) -> Result<()> {
+    let client = reqwest::Client::new();
+    let file_part = multipart::Part::bytes(bytes.to_owned()).file_name("foo.torrent");
 
     let form = reqwest::multipart::Form::new()
         .part("file", file_part)
         .text("filename", "foo.torrent");
-    let _response = client
+
+    let response = client
         .post("https://upload.put.io/v2/files/upload")
         .header("authorization", format!("Bearer {}", api_token))
         .multipart(form)
         .send()
         .await?;
 
+    if !response.status().is_success() {
+        bail!("Error uploading file to put.io: {}", response.status());
+    }
     // Todo: error if invalid request
     Ok(())
 }
@@ -183,17 +212,24 @@ pub struct FileResponse {
 
 pub async fn list_files(api_token: &str, file_id: u64) -> Result<ListFileResponse> {
     let client = reqwest::Client::new();
-    let response: ListFileResponse = client
+    let response = client
         .get(format!(
             "https://api.put.io/v2/files/list?parent_id={}",
             file_id
         ))
         .header("authorization", format!("Bearer {}", api_token))
         .send()
-        .await?
-        .json()
         .await?;
-    Ok(response)
+
+    if !response.status().is_success() {
+        bail!(
+            "Error listing put.io file/direcotry id:{}: {}",
+            file_id,
+            response.status()
+        );
+    }
+
+    Ok(response.json().await?)
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -203,98 +239,54 @@ pub struct URLResponse {
 
 pub async fn url(api_token: &str, file_id: u64) -> Result<String> {
     let client = reqwest::Client::new();
-    let response: URLResponse = client
+    let response = client
         .get(format!("https://api.put.io/v2/files/{}/url", file_id))
         .header("authorization", format!("Bearer {}", api_token))
         .send()
-        .await?
-        .json()
         .await?;
-    Ok(response.url)
+
+    if !response.status().is_success() {
+        bail!(
+            "Error getting url for put.io file id:{}: {}",
+            file_id,
+            response.status()
+        );
+    }
+
+    Ok(response.json::<URLResponse>().await?.url)
 }
 
-
 /// Returns a new OOB code.
-pub async fn get_oob() -> Result<String, Box<dyn std::error::Error>> {
-    let resp = reqwest::get("https://api.put.io/v2/oauth2/oob/code?app_id=6487")
-        .await?
-        .json::<HashMap<String, String>>()
-        .await?;
-    let code = resp.get("code").expect("fetching OOB code");
-    Ok(code.to_string())
+pub async fn get_oob() -> Result<String> {
+    let response = reqwest::get("https://api.put.io/v2/oauth2/oob/code?app_id=6487").await?;
+
+    if !response.status().is_success() {
+        bail!("Error getting put.io OOB: {}", response.status());
+    }
+
+    let j = response.json::<HashMap<String, String>>().await?;
+
+    Ok(j.get("code").expect("fetching OOB code").to_string())
 }
 
 /// Returns new OAuth token if the OOB code is linked to the user's account.
-pub async fn check_oob(oob_code: String) -> Result<String, Box<dyn std::error::Error>> {
-    let resp = reqwest::get(format!(
+pub async fn check_oob(oob_code: String) -> Result<String> {
+    let response = reqwest::get(format!(
         "https://api.put.io/v2/oauth2/oob/code/{}",
         oob_code
     ))
-    .await?
-    .json::<HashMap<String, String>>()
     .await?;
-    let token = resp.get("oauth_token").expect("deserializing OAuth token");
-    Ok(token.to_string())
-}
 
-// Check for new putio transfers and if they qualify, send them on for download
-pub async fn produce_transfers(app_data: Data<AppData>, tx: Sender<TransferMessage>) -> Result<()> {
-    let ten_seconds = std::time::Duration::from_secs(app_data.config.polling_interval);
-    let mut seen = Vec::<u64>::new();
-
-    info!("Checking if there are unfinished transfers.");
-    // We only need to check if something has been imported. Just by looking at the filesystem we
-    // can't determine if a transfer has been imported and removed or hasn't been downloaded.
-    // This avoids downloading a tranfer that has already been imported. In case there is a download,
-    // but it wasn't (completely) imported, we will attempt a (partial) download. Files that have
-    // been completed downloading will be skipped.
-    for putio_transfer in &list_transfers(&app_data.config.putio.api_key)
-        .await?
-        .transfers
-    {
-        let mut transfer = Transfer::from(app_data.clone(), putio_transfer);
-        if putio_transfer.is_downloadable() {
-            let targets = transfer.get_download_targets().await?;
-            transfer.targets = Some(targets);
-            if transfer.is_imported().await {
-                info!("{} already imported. Notifying of import.", &transfer.name);
-                seen.push(transfer.transfer_id);
-                tx.send(TransferMessage::Imported(transfer)).await?;
-            } else {
-                info!(
-                    "{} is not imported yet. Continuing as normal.",
-                    &transfer.name
-                );
-            }
-        }
+    if !response.status().is_success() {
+        bail!(
+            "Error checking put.io OOB {}: {}",
+            oob_code,
+            response.status()
+        );
     }
-    info!("Done checking for unfinished transfers.");
-    loop {
-        let putio_transfers = list_transfers(&app_data.config.putio.api_key)
-            .await?
-            .transfers;
+    let j = response.json::<HashMap<String, String>>().await?;
 
-        if !putio_transfers.is_empty() {
-            debug!("Active transfers: {:?}", putio_transfers);
-        }
-        for putio_transfer in &putio_transfers {
-            if seen.contains(&putio_transfer.id) || !putio_transfer.is_downloadable() {
-                continue;
-            }
-
-            let transfer = Transfer::from(app_data.clone(), putio_transfer);
-
-            info!("Queueing {} for download", transfer.name);
-            tx.send(TransferMessage::QueuedForDownload(transfer))
-                .await?;
-            seen.push(putio_transfer.id);
-        }
-
-        // Remove any transfers from seen that are not in the active transfers
-        let active_ids: Vec<u64> = putio_transfers.iter().map(|t| t.id).collect();
-        seen.retain(|t| active_ids.contains(t));
-
-        sleep(ten_seconds).await;
-    }
+    Ok(j.get("oauth_token")
+        .expect("deserializing OAuth token")
+        .to_string())
 }
-

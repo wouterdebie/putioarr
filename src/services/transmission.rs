@@ -1,6 +1,6 @@
-use std::cmp::max;
 use chrono::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::cmp::max;
 
 use super::putio::PutIOTransfer;
 
@@ -117,7 +117,7 @@ impl From<String> for TransmissionTorrentStatus {
             "STOPPED" | "COMPLETED" | "ERROR" => Self::Stopped,
             "CHECKWAIT" => Self::CheckWait,
             "CHECK" | "COMPLETING" => Self::Check,
-            "QUEUED" => Self::Queued,
+            "QUEUED" | "IN_QUEUE" => Self::Queued,
             "DOWNLOADING" => Self::Downloading,
             "SEEDINGWAIT" => Self::SeedingWait,
             "SEEDING" => Self::Seeding,

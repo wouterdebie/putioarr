@@ -1,13 +1,14 @@
-use crate::http::routes;
+use crate::{http::routes, services::putio};
 use actix_web::{web, App, HttpServer};
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use directories::ProjectDirs;
+use env_logger::TimestampPrecision;
 use figment::{
     providers::{Format, Serialized, Toml},
     Figment,
 };
-use log::info;
+use log::{error, info};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tokio::time::sleep;
@@ -94,14 +95,36 @@ async fn main() -> Result<()> {
                 .merge(Toml::file(&args.config_path))
                 .extract()?;
 
-            std::env::set_var("RUST_LOG", config.loglevel.as_str());
-            env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
+            // std::env::set_var("RUST_LOG", config.loglevel.as_str());
+            // env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
+
+            let log_timestamp = match nix::unistd::isatty(0) {
+                Ok(istty) if istty => Some(TimestampPrecision::Seconds),
+                Ok(_) => None,
+                Err(_) => Some(TimestampPrecision::Seconds),
+            };
+
+            env_logger::Builder::new()
+                .default_format()
+                .format_module_path(false)
+                .format_target(false)
+                .format_timestamp(log_timestamp)
+                .parse_filters(config.loglevel.as_str())
+                .init();
 
             info!("Starting putioarr, version {}", VERSION);
 
             let app_data = web::Data::new(AppData {
                 config: config.clone(),
             });
+
+            match putio::account_info(&app_data.config.putio.api_key).await {
+                Ok(_) => {}
+                Err(e) => {
+                    error!("{}", e);
+                    bail!(e)
+                }
+            }
 
             let data_for_download_system = app_data.clone();
             download_system::start(data_for_download_system)
