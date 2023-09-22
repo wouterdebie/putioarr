@@ -1,4 +1,8 @@
-# 0.3.5
-Fixes some path bug and removes remote files when all is done
+# 0.4.1
+Version 0.4.0: big refactor and parallel downloads
 
-Adds deploy script
+Parallel downloads per transfer
+
+Adds configurable skip_directories
+
+Updated readme
