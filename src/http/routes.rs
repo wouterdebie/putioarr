@@ -1,6 +1,6 @@
 use crate::{
-    handlers::{handle_torrent_add, handle_torrent_get, handle_torrent_remove},
-    transmission::{TransmissionConfig, TransmissionRequest, TransmissionResponse},
+    http::handlers::{handle_torrent_add, handle_torrent_get, handle_torrent_remove},
+    services::transmission::{TransmissionConfig, TransmissionRequest, TransmissionResponse},
     AppData,
 };
 use actix_web::{
@@ -9,7 +9,7 @@ use actix_web::{
     post, web, HttpRequest, HttpResponse,
 };
 use actix_web_httpauth::headers::authorization::{Authorization, Basic};
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use serde_json::json;
 
 const SESSION_ID: &str = "useless-session-id";
@@ -67,7 +67,6 @@ async fn rpc_get(req: HttpRequest, app_data: web::Data<AppData>) -> HttpResponse
     // HttpResponse::Ok().body("Hello world!")
 }
 async fn validate_user(req: HttpRequest, app_data: &web::Data<AppData>) -> Result<()> {
-
     let auth = Authorization::<Basic>::parse(&req)?;
     let user_username = auth.as_ref().user_id();
     let user_password = auth.as_ref().password().context("No password given")?;
@@ -76,5 +75,4 @@ async fn validate_user(req: HttpRequest, app_data: &web::Data<AppData>) -> Resul
     } else {
         bail!("Username or password mismatch")
     }
-
 }

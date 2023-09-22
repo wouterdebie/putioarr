@@ -1,6 +1,14 @@
+use std::collections::HashMap;
+
+use actix_web::web::Data;
 use anyhow::Result;
+use async_channel::Sender;
+use log::{info, debug};
 use reqwest::multipart;
 use serde::{Deserialize, Serialize};
+use tokio::time::sleep;
+
+use crate::{AppData, download_system::transfer::{TransferMessage, Transfer}};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PutIOAccountInfo {
@@ -27,7 +35,7 @@ pub struct PutIOTransfer {
     pub started_at: String,
     pub error_message: Option<String>,
     pub file_id: Option<u64>,
-    pub percent_done: u16,
+    pub percent_done: Option<u16>,
     pub userfile_exists: bool,
 }
 
@@ -204,3 +212,89 @@ pub async fn url(api_token: &str, file_id: u64) -> Result<String> {
         .await?;
     Ok(response.url)
 }
+
+
+/// Returns a new OOB code.
+pub async fn get_oob() -> Result<String, Box<dyn std::error::Error>> {
+    let resp = reqwest::get("https://api.put.io/v2/oauth2/oob/code?app_id=6487")
+        .await?
+        .json::<HashMap<String, String>>()
+        .await?;
+    let code = resp.get("code").expect("fetching OOB code");
+    Ok(code.to_string())
+}
+
+/// Returns new OAuth token if the OOB code is linked to the user's account.
+pub async fn check_oob(oob_code: String) -> Result<String, Box<dyn std::error::Error>> {
+    let resp = reqwest::get(format!(
+        "https://api.put.io/v2/oauth2/oob/code/{}",
+        oob_code
+    ))
+    .await?
+    .json::<HashMap<String, String>>()
+    .await?;
+    let token = resp.get("oauth_token").expect("deserializing OAuth token");
+    Ok(token.to_string())
+}
+
+// Check for new putio transfers and if they qualify, send them on for download
+pub async fn produce_transfers(app_data: Data<AppData>, tx: Sender<TransferMessage>) -> Result<()> {
+    let ten_seconds = std::time::Duration::from_secs(app_data.config.polling_interval);
+    let mut seen = Vec::<u64>::new();
+
+    info!("Checking if there are unfinished transfers.");
+    // We only need to check if something has been imported. Just by looking at the filesystem we
+    // can't determine if a transfer has been imported and removed or hasn't been downloaded.
+    // This avoids downloading a tranfer that has already been imported. In case there is a download,
+    // but it wasn't (completely) imported, we will attempt a (partial) download. Files that have
+    // been completed downloading will be skipped.
+    for putio_transfer in &list_transfers(&app_data.config.putio.api_key)
+        .await?
+        .transfers
+    {
+        let mut transfer = Transfer::from(app_data.clone(), putio_transfer);
+        if putio_transfer.is_downloadable() {
+            let targets = transfer.get_download_targets().await?;
+            transfer.targets = Some(targets);
+            if transfer.is_imported().await {
+                info!("{} already imported. Notifying of import.", &transfer.name);
+                seen.push(transfer.transfer_id);
+                tx.send(TransferMessage::Imported(transfer)).await?;
+            } else {
+                info!(
+                    "{} is not imported yet. Continuing as normal.",
+                    &transfer.name
+                );
+            }
+        }
+    }
+    info!("Done checking for unfinished transfers.");
+    loop {
+        let putio_transfers = list_transfers(&app_data.config.putio.api_key)
+            .await?
+            .transfers;
+
+        if !putio_transfers.is_empty() {
+            debug!("Active transfers: {:?}", putio_transfers);
+        }
+        for putio_transfer in &putio_transfers {
+            if seen.contains(&putio_transfer.id) || !putio_transfer.is_downloadable() {
+                continue;
+            }
+
+            let transfer = Transfer::from(app_data.clone(), putio_transfer);
+
+            info!("Queueing {} for download", transfer.name);
+            tx.send(TransferMessage::QueuedForDownload(transfer))
+                .await?;
+            seen.push(putio_transfer.id);
+        }
+
+        // Remove any transfers from seen that are not in the active transfers
+        let active_ids: Vec<u64> = putio_transfers.iter().map(|t| t.id).collect();
+        seen.retain(|t| active_ids.contains(t));
+
+        sleep(ten_seconds).await;
+    }
+}
+

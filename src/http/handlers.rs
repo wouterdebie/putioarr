@@ -1,7 +1,7 @@
 use crate::{
     // downloader::DownloadStatus,
-    putio::{self, PutIOTransfer},
-    transmission::{TransmissionRequest, TransmissionTorrent},
+    services::putio::{self, PutIOTransfer},
+    services::transmission::{TransmissionRequest, TransmissionTorrent},
     AppData,
 };
 use actix_web::web;

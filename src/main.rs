@@ -1,3 +1,4 @@
+use crate::http::routes;
 use actix_web::{web, App, HttpServer};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -11,13 +12,9 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tokio::time::sleep;
 
-mod arr;
-mod downloader;
-mod handlers;
-mod oob;
-mod putio;
-mod routes;
-mod transmission;
+mod download_system;
+mod http;
+mod services;
 
 /// put.io to sonarr/radarr proxy
 #[derive(Parser)]
@@ -43,15 +40,17 @@ struct RunArgs {
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Config {
-    username: String,
-    password: String,
     bind_address: String,
-    port: u16,
-    loglevel: String,
     download_directory: String,
-    uid: u32,
+    download_workers: usize,
+    loglevel: String,
+    orchestration_workers: usize,
+    password: String,
     polling_interval: u64,
+    port: u16,
     skip_directories: Vec<String>,
+    uid: u32,
+    username: String,
     putio: PutioConfig,
     sonarr: Option<ArrConfig>,
     radarr: Option<ArrConfig>,
@@ -82,10 +81,12 @@ async fn main() -> Result<()> {
         Commands::Run(args) => {
             let config: Config = Figment::new()
                 .join(Serialized::default("bind_address", "0.0.0.0"))
-                .join(Serialized::default("port", 9091))
+                .join(Serialized::default("download_workers", 4))
+                .join(Serialized::default("orchestration_workers", 10))
                 .join(Serialized::default("loglevel", "info"))
-                .join(Serialized::default("uid", 1000))
                 .join(Serialized::default("polling_interval", 10))
+                .join(Serialized::default("port", 9091))
+                .join(Serialized::default("uid", 1000))
                 .join(Serialized::default(
                     "skip_directories",
                     vec!["sample", "extras"],
@@ -103,7 +104,7 @@ async fn main() -> Result<()> {
             });
 
             let data_for_download_system = app_data.clone();
-            downloader::start_download_system(data_for_download_system)
+            download_system::start(data_for_download_system)
                 .await
                 .unwrap();
 
@@ -127,7 +128,7 @@ async fn main() -> Result<()> {
         }
         Commands::GetToken => {
             // Create new OOB code and prompt user to link
-            let oob_code = oob::get().await.expect("fetching OOB code");
+            let oob_code = services::putio::get_oob().await.expect("fetching OOB code");
             println!(
                 "Go to https://put.io/link and enter the code: {:#?}",
                 oob_code
@@ -140,7 +141,7 @@ async fn main() -> Result<()> {
             loop {
                 sleep(three_seconds).await;
 
-                let get_oauth_token_result = oob::check(oob_code.clone()).await;
+                let get_oauth_token_result = services::putio::check_oob(oob_code.clone()).await;
 
                 match get_oauth_token_result {
                     Ok(token) => {

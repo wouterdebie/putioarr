@@ -49,6 +49,13 @@ polling_interval = 10
 # Optional skip directories when downloding, default ["sample", "extras"]
 skip_directories = ["sample", "extras"]
 
+# Optional number of orchestration workers, default 10. Unless there are many changes coming from
+# put.io, you shouldn't have to touch this number. 10 is already overkill.
+orchestration_workers = 10
+
+# Optional number of download workers, default 4. This controls how many downloads we run in parallel.
+download_workers = 4
+
 [putio]
 api_key =  "MYPUTIOKEY"
 
@@ -66,7 +73,6 @@ api_key = "MYRADARRAPIKEY"
 
 ## TODO:
 - Better Error handling and retry behavior
-- Multi-threaded downloads (?)
 - The session ID provided is hard coded. Not sure if it matters.
 - (Add option to not delete downloads)
 - Docker image

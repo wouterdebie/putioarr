@@ -18,7 +18,7 @@ pub struct ArrHistoryRecord {
     pub data: HashMap<String, Option<String>>,
 }
 
-pub async fn is_imported(target: &str, api_key: &str, base_url: &str) -> Result<bool> {
+pub async fn check_imported(target: &str, api_key: &str, base_url: &str) -> Result<bool> {
     let client = reqwest::Client::new();
     let mut inspected = 0;
     let mut page = 0;
