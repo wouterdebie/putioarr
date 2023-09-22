@@ -10,6 +10,7 @@ use actix_web::{
 };
 use actix_web_httpauth::headers::authorization::{Authorization, Basic};
 use anyhow::{bail, Context, Result};
+use log::error;
 use serde_json::json;
 
 const SESSION_ID: &str = "useless-session-id";
@@ -39,7 +40,13 @@ pub(crate) async fn rpc_post(
         "torrent-set" => None, // Nothing to do here
         "queue-move-top" => None,
         "torrent-remove" => handle_torrent_remove(putio_api_token, &payload).await,
-        "torrent-add" => handle_torrent_add(putio_api_token, &payload).await.unwrap(),
+        "torrent-add" => match handle_torrent_add(putio_api_token, &payload).await {
+            Ok(v) => v,
+            Err(e) => {
+                error!("{}", e);
+                return HttpResponse::BadRequest().body(e.to_string());
+            }
+        },
         _ => panic!("Unknwon method {}", payload.method),
     };
 
