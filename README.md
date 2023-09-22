@@ -27,8 +27,12 @@ A configuration file can be specified using `-c`, but the default configuration 
 
 TOML is used as the configuration format:
 ```
+# Required. Username and password that sonarr/radarr use to connect to the proxy
 username = "myusername"
 password = "mypassword"
+
+# Required. Directory where the proxy will download files to. This directory has to be readable by
+# sonarr/radarr in order to import downloads
 download_directory = "/path/to/downloads"
 
 # Optional bind address, default "0.0.0.0"
@@ -57,6 +61,7 @@ orchestration_workers = 10
 download_workers = 4
 
 [putio]
+# Required. Putio API key. You can generate one using `putioarr get-token`
 api_key =  "MYPUTIOKEY"
 
 # Both [sonarr] and [radarr] are optional, but you'll need at least one of them
