@@ -1,0 +1,16 @@
+---
+version: "2.1"
+services:
+  putioarr:
+    image: wouterdebie/putioarr:latest
+    container_name: putioarr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Etc/UTC
+    volumes:
+      - /media/config/putioarr:/config
+      - /media/downloads:/downloads
+    ports:
+      - 9091:9091
+    restart: unless-stopped

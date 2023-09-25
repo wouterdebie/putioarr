@@ -10,12 +10,12 @@ use figment::{
 };
 use log::{error, info};
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
-use tokio::time::sleep;
+use utils::{generate_config, get_token};
 
 mod download_system;
 mod http;
 mod services;
+mod utils;
 
 /// put.io to sonarr/radarr proxy
 #[derive(Parser)]
@@ -31,6 +31,8 @@ enum Commands {
     Run(RunArgs),
     /// Generate a put.io API token
     GetToken,
+    /// Generate config
+    GenerateConfig(RunArgs),
 }
 
 #[derive(Parser)]
@@ -95,9 +97,6 @@ async fn main() -> Result<()> {
                 .merge(Toml::file(&args.config_path))
                 .extract()?;
 
-            // std::env::set_var("RUST_LOG", config.loglevel.as_str());
-            // env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
-
             let log_timestamp = match nix::unistd::isatty(0) {
                 Ok(istty) if istty => Some(TimestampPrecision::Seconds),
                 Ok(_) => None,
@@ -150,32 +149,11 @@ async fn main() -> Result<()> {
             .context("Unable to start http server")
         }
         Commands::GetToken => {
-            // Create new OOB code and prompt user to link
-            let oob_code = services::putio::get_oob().await.expect("fetching OOB code");
-            println!(
-                "Go to https://put.io/link and enter the code: {:#?}",
-                oob_code
-            );
-            println!("Waiting for link...");
-
-            // Every three seconds, check if the OOB code was linked to the user's account
-            let three_seconds = Duration::from_secs(3);
-
-            loop {
-                sleep(three_seconds).await;
-
-                let get_oauth_token_result = services::putio::check_oob(oob_code.clone()).await;
-
-                match get_oauth_token_result {
-                    Ok(token) => {
-                        println!("Put.io API token: {token}");
-                        break;
-                    }
-                    Err(_error) => {
-                        continue;
-                    }
-                };
-            }
+            get_token().await?;
+            Ok(())
+        }
+        Commands::GenerateConfig(args) => {
+            generate_config(&args.config_path).await?;
             Ok(())
         }
     }

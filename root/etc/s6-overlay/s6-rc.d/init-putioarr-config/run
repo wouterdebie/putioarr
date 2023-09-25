@@ -1,0 +1,18 @@
+#!/usr/bin/with-contenv bash
+# shellcheck shell=bash
+
+if [[ ! -f /config/config.toml ]]; then
+    /usr/bin/putioarr generate-config -c /config/config.toml
+fi
+
+# permissions
+lsiown -R abc:abc \
+    /config
+
+# chown download directory if currently not set to abc
+if [[ -d /downloads ]]; then
+    if [[ "$(stat -c '%U' /downloads)" != "abc" ]]; then
+        lsiown -R abc:abc /downloads
+    fi
+fi
+
