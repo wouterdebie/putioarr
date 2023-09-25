@@ -1,5 +1,5 @@
 
-FROM rust:1.72-alpine as builder
+FROM --platform=$BUILDPLATFORM rust:1.72-alpine as builder
 ARG TARGETARCH
 WORKDIR /usr/src
 
@@ -41,7 +41,7 @@ RUN cp /usr/src/putioarr/target/$(cat /.platform)/release/putioarr /usr/bin
 
 ### Rutime
 
-FROM ghcr.io/linuxserver/baseimage-alpine:edge
+FROM --platform=$BUILDPLATFORM ghcr.io/linuxserver/baseimage-alpine:edge
 ARG TARGETARCH
 
 # set version label
