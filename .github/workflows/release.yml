@@ -3,10 +3,8 @@ on:
     branches:
       - main
       - 'releases/**'
-
-
-  #   tags:
-  #     - v*
+    tags:
+      - v*
   #   branches-ignore:
   #     - main
   # pull_request:
@@ -59,6 +57,8 @@ jobs:
           tags: ${{ steps.meta_tag.outputs.tags }}
           push: true
           platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Build and push Docker images (branch)
         if: startsWith(github.ref, 'refs/heads/')
@@ -69,3 +69,5 @@ jobs:
           tags: ${{ steps.meta_branch.outputs.tags }}
           push: true
           platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
