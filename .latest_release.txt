@@ -1,14 +1,2 @@
-# 0.5.1
-Fix gh build cache
-
-Create docker manifests
-
-Update github actions
-
-Don't set provenance for docker images
-
-Working arm build, adds whisparr
-
-Remove openssl in favor of rusttls
-
-Build for arm64
+# 0.5.2
+Add gcompat to alpine runtime
