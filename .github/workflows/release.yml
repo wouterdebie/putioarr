@@ -67,8 +67,8 @@ jobs:
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta_tag.outputs.labels }}
           outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=build-${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=build-${{ matrix.platform }}
 
       - name: Build and push Docker images (branch)
         id: build_branch
@@ -82,8 +82,8 @@ jobs:
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta_branch.outputs.labels }}
           outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=build-${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=build-${{ matrix.platform }}
 
       - name: Export digest (tag)
         run: |
