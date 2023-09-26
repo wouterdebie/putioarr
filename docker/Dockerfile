@@ -41,7 +41,7 @@ ARG VERSION
 
 LABEL maintainer="wouterdebie"
 
-RUN apk add musl gcc
+RUN apk add musl gcc gcompat
 COPY --from=builder /usr/bin/putioarr /usr/bin
 
 # add local files
