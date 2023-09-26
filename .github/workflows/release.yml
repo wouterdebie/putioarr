@@ -45,9 +45,6 @@ jobs:
           tags: |
             type=ref,event=branch
 
-      # - name: Set up QEMU
-      #   uses: docker/setup-qemu-action@v2
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
 
@@ -66,6 +63,7 @@ jobs:
           file: ./docker/Dockerfile
           tags: ${{ steps.meta_tag.outputs.tags }}
           push: true
+          provenance: false
           platforms: ${{ matrix.platform }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -78,6 +76,7 @@ jobs:
           file: ./docker/Dockerfile
           tags: ${{ steps.meta_branch.outputs.tags }}
           push: true
+          provenance: false
           platforms: ${{ matrix.platform }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
