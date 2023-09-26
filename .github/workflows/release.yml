@@ -5,16 +5,14 @@ on:
       - 'releases/**'
     tags:
       - v*
-  #   branches-ignore:
-  #     - main
-  # pull_request:
-  #   branches:
-  #     - main
 
 name: Release Build
 
+env:
+  REGISTRY_IMAGE: ghcr.io/wouterdebie/putioarr
+
 jobs:
-  amd64docker:
+  build:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -25,13 +23,15 @@ jobs:
 
     name: Docker + publish
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Docker meta (tag)
         if: startsWith(github.ref, 'refs/tags/')
         id: meta_tag
-        uses: docker/metadata-action@v4
+        uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/wouterdebie/putioarr
+          images: ${{ env.REGISTRY_IMAGE }}
           tags: |
             latest
             type=semver,pattern={{version}}
@@ -39,9 +39,9 @@ jobs:
       - name: Docker meta (branch)
         if: startsWith(github.ref, 'refs/heads/')
         id: meta_branch
-        uses: docker/metadata-action@v4
+        uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/wouterdebie/putioarr
+          images: ${{ env.REGISTRY_IMAGE }}
           tags: |
             type=ref,event=branch
 
@@ -56,27 +56,84 @@ jobs:
           password: ${{ secrets.CR_PAT }}
 
       - name: Build and push Docker images (tag)
+        id: build_tag
         if: startsWith(github.ref, 'refs/tags/')
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./docker/Dockerfile
-          tags: ${{ steps.meta_tag.outputs.tags }}
+          # tags: ${{ steps.meta_tag.outputs.tags }}
           push: true
-          provenance: false
           platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta_tag.outputs.labels }}
+          outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Build and push Docker images (branch)
+        id: build_branch
         if: startsWith(github.ref, 'refs/heads/')
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./docker/Dockerfile
-          tags: ${{ steps.meta_branch.outputs.tags }}
+          # tags: ${{ steps.meta_branch.outputs.tags }}
           push: true
-          provenance: false
           platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta_branch.outputs.labels }}
+          outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Export digest (tag)
+        run: |
+            mkdir -p /tmp/digests
+            digest="${{ steps.build_tag.outputs.digest }}"
+            touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Export digest (branch)
+        run: |
+            mkdir -p /tmp/digests
+            digest="${{ steps.build_branch.outputs.digest }}"
+            touch "/tmp/digests/${digest#sha256:}"
+
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v3
+        with:
+          name: digests
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    runs-on: ubuntu-latest
+    needs:
+      - build
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v3
+        with:
+          name: digests
+          path: /tmp/digests
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY_IMAGE }}
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.CR_PAT }}
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.REGISTRY_IMAGE }}@sha256:%s ' *)
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}
