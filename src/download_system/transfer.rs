@@ -35,6 +35,9 @@ impl Transfer {
         if let Some(a) = &self.app_data.config.radarr {
             check_services.push(("Radarr", a.url.clone(), a.api_key.clone()))
         }
+        if let Some(a) = &self.app_data.config.whisparr {
+            check_services.push(("Whisparr", a.url.clone(), a.api_key.clone()))
+        }
 
         let targets = targets
             .into_iter()

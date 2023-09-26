@@ -54,6 +54,11 @@ url = "http://myradarrhost:7878/radarr"
 # Can be found in Settings -> General
 api_key = "MYRADARRAPIKEY"
 
+[whisparr]
+url = "http://mywhisparrhost:6969/radarr"
+# Can be found in Settings -> General
+api_key = "MYWHISPARRAPIKEY"
+
 "#;
 
 #[derive(Serialize)]

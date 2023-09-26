@@ -57,6 +57,7 @@ pub struct Config {
     putio: PutioConfig,
     sonarr: Option<ArrConfig>,
     radarr: Option<ArrConfig>,
+    whisparr: Option<ArrConfig>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
