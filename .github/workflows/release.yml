@@ -25,11 +25,11 @@ jobs:
 
     name: Docker + publish
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Docker meta (tag)
         if: startsWith(github.ref, 'refs/tags/')
         id: meta_tag
-        uses: docker/metadata-action@v3
+        uses: docker/metadata-action@v4
         with:
           images: ghcr.io/wouterdebie/putioarr
           tags: |
@@ -39,17 +39,17 @@ jobs:
       - name: Docker meta (branch)
         if: startsWith(github.ref, 'refs/heads/')
         id: meta_branch
-        uses: docker/metadata-action@v3
+        uses: docker/metadata-action@v4
         with:
           images: ghcr.io/wouterdebie/putioarr
           tags: |
             type=ref,event=branch
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@v3
 
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@v1
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
