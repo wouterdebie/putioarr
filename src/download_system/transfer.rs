@@ -10,7 +10,7 @@ use anyhow::Result;
 use async_channel::Sender;
 use async_recursion::async_recursion;
 use colored::*;
-use log::info;
+use log::{error, info};
 use serde::{Deserialize, Serialize};
 use std::{fmt::Display, path::Path};
 use tokio::time::sleep;
@@ -50,7 +50,13 @@ impl Transfer {
         for target in targets {
             let mut service_results = vec![];
             for (service_name, url, key) in &check_services {
-                let service_result = arr::check_imported(&target.to, key, url).await.unwrap();
+                let service_result = match arr::check_imported(&target.to, key, url).await {
+                    Ok(r) => r,
+                    Err(e) => {
+                        error!("Error retrieving history form {}: {}", service_name, e);
+                        false
+                    }
+                };
                 if service_result {
                     info!(
                         "{}: found imported by {}",

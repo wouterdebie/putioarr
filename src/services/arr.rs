@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{bail, Result};
 use serde::Deserialize;
 use std::collections::HashMap;
 
@@ -26,15 +26,15 @@ pub async fn check_imported(target: &str, api_key: &str, base_url: &str) -> Resu
         let url = format!(
             "{base_url}/api/v3/history?includeSeries=false&includeEpisode=false&page={page}&pageSize=1000");
 
-        let response: ArrHistoryResponse = client
-            .get(&url)
-            .header("X-Api-Key", api_key)
-            .send()
-            .await?
-            .json()
-            .await?;
+        let response = client.get(&url).header("X-Api-Key", api_key).send().await?;
 
-        for record in response.records {
+        if !response.status().is_success() {
+            bail!("url: {}, status: {}", url, response.status());
+        }
+
+        let history_response: ArrHistoryResponse = response.json().await?;
+
+        for record in history_response.records {
             if record.event_type == "downloadFolderImported"
                 && record.data["droppedPath"].as_ref().unwrap() == target
             {
@@ -45,7 +45,7 @@ pub async fn check_imported(target: &str, api_key: &str, base_url: &str) -> Resu
             }
         }
 
-        if response.total_records < inspected {
+        if history_response.total_records < inspected {
             page += 1;
         } else {
             return Ok(false);
