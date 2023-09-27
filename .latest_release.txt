@@ -1,2 +1,4 @@
-# 0.5.3
-Better error handling when arr requests fail
+# 0.5.4
+Slightly better error handling on failed downloads
+
+Better error reporting on download failures
