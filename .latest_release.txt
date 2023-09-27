@@ -1,2 +1,2 @@
-# 0.5.2
-Add gcompat to alpine runtime
+# 0.5.3
+Better error handling when arr requests fail
