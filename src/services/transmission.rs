@@ -1,4 +1,5 @@
 use chrono::prelude::*;
+use log::warn;
 use serde::{Deserialize, Serialize};
 use std::cmp::max;
 
@@ -72,7 +73,6 @@ pub struct TransmissionTorrent {
 
 impl From<PutIOTransfer> for TransmissionTorrent {
     fn from(t: PutIOTransfer) -> Self {
-
         let s = match t.started_at {
             Some(t) => t,
             None => Utc::now().format("%FT%T").to_string(),
@@ -128,7 +128,10 @@ impl From<String> for TransmissionTorrentStatus {
             "DOWNLOADING" => Self::Downloading,
             "SEEDINGWAIT" => Self::SeedingWait,
             "SEEDING" => Self::Seeding,
-            _ => panic!("Unknown status {}", value),
+            _ => {
+                warn!("Status {} unknown. Treating as CheckWait.", &value);
+                Self::CheckWait
+            }
         }
     }
 }
