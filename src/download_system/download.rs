@@ -59,7 +59,7 @@ async fn download_target(app_data: &Data<AppData>, target: &DownloadTarget) -> R
                 info!("{}: download {}", &target, "started".yellow());
                 match fetch(target, app_data.config.uid).await {
                     Ok(_) => info!("{}: download {}", &target, "succeeded".green()),
-                    Err(_) => error!("{}: download {}", &target, "failed".red()),
+                    Err(e) => error!("{}: download {}: {}", &target, "failed".red(), e),
                 };
             } else {
                 info!("{}: already exists", &target);
