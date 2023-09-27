@@ -1,7 +1,7 @@
 use super::transfer::{DownloadTarget, TargetType};
 use crate::AppData;
 use actix_web::web::Data;
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use async_channel::{Receiver, Sender};
 use colored::*;
 use file_owner::PathExt;
@@ -34,8 +34,8 @@ impl Worker {
 
             // Download the target
             let done_status = match download_target(&self.app_data, &dtm.download_target).await {
-                Ok(_) => DownloadDoneStatus::Success,
-                Err(_) => DownloadDoneStatus::Failed,
+                Ok(_) => DownloadDoneStatus::Success(dtm.download_target),
+                Err(_) => DownloadDoneStatus::Failed(dtm.download_target),
             };
             dtm.tx.send(done_status).await?;
         }
@@ -59,7 +59,10 @@ async fn download_target(app_data: &Data<AppData>, target: &DownloadTarget) -> R
                 info!("{}: download {}", &target, "started".yellow());
                 match fetch(target, app_data.config.uid).await {
                     Ok(_) => info!("{}: download {}", &target, "succeeded".green()),
-                    Err(e) => error!("{}: download {}: {}", &target, "failed".red(), e),
+                    Err(e) => {
+                        error!("{}: download {}: {}", &target, "failed".red(), e);
+                        bail!(e)
+                    }
                 };
             } else {
                 info!("{}: already exists", &target);
@@ -96,6 +99,6 @@ pub struct DownloadTargetMessage {
 
 #[derive(Debug, Clone)]
 pub enum DownloadDoneStatus {
-    Success,
-    Failed,
+    Success(DownloadTarget),
+    Failed(DownloadTarget),
 }

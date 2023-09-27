@@ -68,18 +68,27 @@ impl Worker {
                     }
 
                     // Wait for all the workers having sent back their status.
-                    // TODO: Some better error handling
+                    let mut all_downloaded = vec![];
                     for (_, done_rx) in done_channels {
-                        done_rx.recv().await?;
+                        all_downloaded.push(done_rx.recv().await?);
                     }
 
-                    info!("{}: download {}", t, "done".blue());
-                    self.tx
-                        .send(TransferMessage::Downloaded(Transfer {
-                            targets: Some(targets),
-                            ..t
-                        }))
-                        .await?;
+                    // Check if all are success
+                    if all_downloaded.iter().all(|d| match d {
+                        DownloadDoneStatus::Success(_) => true,
+                        DownloadDoneStatus::Failed(_) => false,
+                    }) {
+                        info!("{}: download {}", t, "done".blue());
+                        self.tx
+                            .send(TransferMessage::Downloaded(Transfer {
+                                targets: Some(targets),
+                                ..t
+                            }))
+                            .await?;
+                    } else {
+                        // TODO: figure out what to do here..
+                        warn!("{}: not all targets downloaded", t)
+                    }
                 }
                 TransferMessage::Downloaded(t) => {
                     let tx = self.tx.clone();
