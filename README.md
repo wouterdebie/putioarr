@@ -66,7 +66,7 @@ docker run -d \
   -e PGID=1000 \
   -e TZ=Etc/UTC \
   -p 9091:9091 \
-  -v /path/to/deluge/config:/config \
+  -v /path/to/putioarr/config:/config \
   -v /path/to/your/downloads:/downloads \
   --restart unless-stopped \
   ghcr.io/wouterdebie/putioarr:latest
