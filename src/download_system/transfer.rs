@@ -239,8 +239,10 @@ pub async fn produce_transfers(app_data: Data<AppData>, tx: Sender<TransferMessa
     let mut start = std::time::Instant::now();
 
     loop {
-        if let Ok(putio_transfers) = putio::list_transfers(&app_data.config.putio.api_key).await {
-            for putio_transfer in &putio_transfers.transfers {
+        if let Ok(list_transfer_response) =
+            putio::list_transfers(&app_data.config.putio.api_key).await
+        {
+            for putio_transfer in &list_transfer_response.transfers {
                 if seen.contains(&putio_transfer.id) || !putio_transfer.is_downloadable() {
                     continue;
                 }
@@ -253,16 +255,30 @@ pub async fn produce_transfers(app_data: Data<AppData>, tx: Sender<TransferMessa
             }
 
             // Remove any transfers from seen that are not in the active transfers
-            let active_ids: Vec<u64> = putio_transfers.transfers.iter().map(|t| t.id).collect();
+            let active_ids: Vec<u64> = list_transfer_response
+                .transfers
+                .iter()
+                .map(|t| t.id)
+                .collect();
             seen.retain(|t| active_ids.contains(t));
-            sleep(putio_check_interval).await;
 
             // Log status when 60 seconds have passed since last time
-            if start.elapsed().as_secs() > 60 {
-                info!("Active transfers: {}", active_ids.len());
+            if start.elapsed().as_secs() >= 60 {
+                info!(
+                    "Active transfers: [{}]",
+                    &list_transfer_response
+                        .transfers
+                        .iter()
+                        .map(|t| Transfer::from(app_data.clone(), t)
+                            .hash
+                            .unwrap_or("0000"[..4].to_string()))
+                        .collect::<Vec<String>>()
+                        .join(", ")
+                );
                 start = std::time::Instant::now();
             }
 
+            sleep(putio_check_interval).await;
         } else {
             warn!("List put.io transfers failed. Retrying..");
             continue;
