@@ -233,7 +233,11 @@ pub async fn produce_transfers(app_data: Data<AppData>, tx: Sender<TransferMessa
             }
         }
     }
-    info!("Done checking for unfinished transfers");
+    info!("Done checking for unfinished transfers. Starting to monitor transfers.");
+
+    // Set the start time
+    let mut start = std::time::Instant::now();
+
     loop {
         if let Ok(putio_transfers) = putio::list_transfers(&app_data.config.putio.api_key).await {
             for putio_transfer in &putio_transfers.transfers {
@@ -252,6 +256,13 @@ pub async fn produce_transfers(app_data: Data<AppData>, tx: Sender<TransferMessa
             let active_ids: Vec<u64> = putio_transfers.transfers.iter().map(|t| t.id).collect();
             seen.retain(|t| active_ids.contains(t));
             sleep(putio_check_interval).await;
+
+            // Log status when 60 seconds have passed since last time
+            if start.elapsed().as_secs() > 60 {
+                info!("Active transfers: {}", active_ids.len());
+                start = std::time::Instant::now();
+            }
+
         } else {
             warn!("List put.io transfers failed. Retrying..");
             continue;
