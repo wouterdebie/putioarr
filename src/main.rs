@@ -98,10 +98,16 @@ async fn main() -> Result<()> {
                 .merge(Toml::file(&args.config_path))
                 .extract()?;
 
-            let log_timestamp = match nix::unistd::isatty(0) {
-                Ok(istty) if istty => Some(TimestampPrecision::Seconds),
-                Ok(_) => None,
-                Err(_) => Some(TimestampPrecision::Seconds),
+            let log_timestamp = if in_container::in_container() {
+                Some(TimestampPrecision::Seconds)
+            } else if let Ok(istty) = nix::unistd::isatty(0) {
+                if istty {
+                    Some(TimestampPrecision::Seconds)
+                } else {
+                    None
+                }
+            } else {
+                None
             };
 
             env_logger::Builder::new()
