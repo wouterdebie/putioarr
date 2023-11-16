@@ -1,2 +1,2 @@
-# 0.5.8
-Adds timeouts to put.io API calls
+# 0.5.9
+Log time stamps when running in container
