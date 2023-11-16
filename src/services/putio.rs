@@ -1,7 +1,7 @@
 use anyhow::{bail, Result};
 use reqwest::multipart;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::{collections::HashMap, time::Duration};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PutIOAccountInfo {
@@ -81,6 +81,7 @@ pub async fn list_transfers(api_token: &str) -> Result<ListTransferResponse> {
     let client = reqwest::Client::new();
     let response = client
         .get("https://api.put.io/v2/transfers/list")
+        .timeout(Duration::from_secs(10))
         .header("authorization", format!("Bearer {}", api_token))
         .send()
         .await?;
@@ -96,6 +97,7 @@ pub async fn get_transfer(api_token: &str, transfer_id: u64) -> Result<GetTransf
     let client = reqwest::Client::new();
     let response = client
         .get(format!("https://api.put.io/v2/transfers/{}", transfer_id))
+        .timeout(Duration::from_secs(10))
         .header("authorization", format!("Bearer {}", api_token))
         .send()
         .await?;
@@ -116,6 +118,7 @@ pub async fn remove_transfer(api_token: &str, transfer_id: u64) -> Result<()> {
     let form = multipart::Form::new().text("transfer_ids", transfer_id.to_string());
     let response = client
         .post("https://api.put.io/v2/transfers/remove")
+        .timeout(Duration::from_secs(10))
         .multipart(form)
         .header("authorization", format!("Bearer {}", api_token))
         .send()
@@ -137,6 +140,7 @@ pub async fn delete_file(api_token: &str, file_id: u64) -> Result<()> {
     let form = multipart::Form::new().text("file_ids", file_id.to_string());
     let response = client
         .post("https://api.put.io/v2/files/delete")
+        .timeout(Duration::from_secs(10))
         .multipart(form)
         .header("authorization", format!("Bearer {}", api_token))
         .send()
@@ -158,6 +162,7 @@ pub async fn add_transfer(api_token: &str, url: &str) -> Result<()> {
     let form = multipart::Form::new().text("url", url.to_string());
     let response = client
         .post("https://api.put.io/v2/transfers/add")
+        .timeout(Duration::from_secs(10))
         .multipart(form)
         .header("authorization", format!("Bearer {}", api_token))
         .send()
@@ -180,6 +185,7 @@ pub async fn upload_file(api_token: &str, bytes: &[u8]) -> Result<()> {
 
     let response = client
         .post("https://upload.put.io/v2/files/upload")
+        .timeout(Duration::from_secs(10))
         .header("authorization", format!("Bearer {}", api_token))
         .multipart(form)
         .send()

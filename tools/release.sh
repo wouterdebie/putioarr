@@ -1,7 +1,6 @@
 #!/bin/bash
 set -e
 
-set -e
 level=${1:-patch}
 echo "Releasing.."
 echo "=== cargo check ==="

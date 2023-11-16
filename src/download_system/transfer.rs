@@ -10,7 +10,7 @@ use anyhow::Result;
 use async_channel::Sender;
 use async_recursion::async_recursion;
 use colored::*;
-use log::{error, info};
+use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::{fmt::Display, path::Path};
 use tokio::time::sleep;
@@ -235,27 +235,26 @@ pub async fn produce_transfers(app_data: Data<AppData>, tx: Sender<TransferMessa
     }
     info!("Done checking for unfinished transfers");
     loop {
-        info!("Checking put.io transfers");
-        let putio_transfers = putio::list_transfers(&app_data.config.putio.api_key)
-            .await?
-            .transfers;
+        if let Ok(putio_transfers) = putio::list_transfers(&app_data.config.putio.api_key).await {
+            for putio_transfer in &putio_transfers.transfers {
+                if seen.contains(&putio_transfer.id) || !putio_transfer.is_downloadable() {
+                    continue;
+                }
+                let transfer = Transfer::from(app_data.clone(), putio_transfer);
 
-        for putio_transfer in &putio_transfers {
-            if seen.contains(&putio_transfer.id) || !putio_transfer.is_downloadable() {
-                continue;
+                info!("{}: ready for download", transfer);
+                tx.send(TransferMessage::QueuedForDownload(transfer))
+                    .await?;
+                seen.push(putio_transfer.id);
             }
-            let transfer = Transfer::from(app_data.clone(), putio_transfer);
 
-            info!("{}: ready for download", transfer);
-            tx.send(TransferMessage::QueuedForDownload(transfer))
-                .await?;
-            seen.push(putio_transfer.id);
-        }
-
-        // Remove any transfers from seen that are not in the active transfers
-        let active_ids: Vec<u64> = putio_transfers.iter().map(|t| t.id).collect();
-        seen.retain(|t| active_ids.contains(t));
-        info!("Done checking put.io transfers");
-        sleep(putio_check_interval).await;
+            // Remove any transfers from seen that are not in the active transfers
+            let active_ids: Vec<u64> = putio_transfers.transfers.iter().map(|t| t.id).collect();
+            seen.retain(|t| active_ids.contains(t));
+            sleep(putio_check_interval).await;
+        } else {
+            warn!("List put.io transfers failed. Retrying..");
+            continue;
+        };
     }
 }
