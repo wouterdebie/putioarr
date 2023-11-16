@@ -271,7 +271,9 @@ pub async fn produce_transfers(app_data: Data<AppData>, tx: Sender<TransferMessa
                         .iter()
                         .map(|t| Transfer::from(app_data.clone(), t)
                             .hash
-                            .unwrap_or("0000"[..4].to_string()))
+                            .as_deref()
+                            .unwrap_or("0000")[..4]
+                            .to_string())
                         .collect::<Vec<String>>()
                         .join(", ")
                 );
