@@ -207,7 +207,7 @@ pub enum TargetType {
 
 // Check for new putio transfers and if they qualify, send them on for download
 pub async fn produce_transfers(app_data: Data<AppData>, tx: Sender<TransferMessage>) -> Result<()> {
-    let ten_seconds = std::time::Duration::from_secs(app_data.config.polling_interval);
+    let putio_check_interval = std::time::Duration::from_secs(app_data.config.polling_interval);
     let mut seen = Vec::<u64>::new();
 
     info!("Checking unfinished transfers");
@@ -235,6 +235,7 @@ pub async fn produce_transfers(app_data: Data<AppData>, tx: Sender<TransferMessa
     }
     info!("Done checking for unfinished transfers");
     loop {
+        info!("Checking put.io transfers");
         let putio_transfers = putio::list_transfers(&app_data.config.putio.api_key)
             .await?
             .transfers;
@@ -254,7 +255,7 @@ pub async fn produce_transfers(app_data: Data<AppData>, tx: Sender<TransferMessa
         // Remove any transfers from seen that are not in the active transfers
         let active_ids: Vec<u64> = putio_transfers.iter().map(|t| t.id).collect();
         seen.retain(|t| active_ids.contains(t));
-
-        sleep(ten_seconds).await;
+        info!("Done checking put.io transfers");
+        sleep(putio_check_interval).await;
     }
 }
