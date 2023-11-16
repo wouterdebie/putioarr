@@ -1,2 +1,6 @@
-# 0.5.5
-Care less about unknown put.io statuses
+# 0.5.6
+Add debug output to track down stalling issue
+
+Adds PREPARING_DOWNLOAD status
+
+Adds GH issue templates
