@@ -264,19 +264,12 @@ pub async fn produce_transfers(app_data: Data<AppData>, tx: Sender<TransferMessa
 
             // Log status when 60 seconds have passed since last time
             if start.elapsed().as_secs() >= 60 {
-                info!(
-                    "Active transfers: [{}]",
-                    &list_transfer_response
-                        .transfers
-                        .iter()
-                        .map(|t| Transfer::from(app_data.clone(), t)
-                            .hash
-                            .as_deref()
-                            .unwrap_or("0000")[..4]
-                            .to_string())
-                        .collect::<Vec<String>>()
-                        .join(", ")
-                );
+                info!("Active transfers: ");
+                list_transfer_response
+                    .transfers
+                    .iter()
+                    .for_each(|t| info!("  {}", Transfer::from(app_data.clone(), t)));
+
                 start = std::time::Instant::now();
             }
 
