@@ -264,7 +264,10 @@ pub async fn produce_transfers(app_data: Data<AppData>, tx: Sender<TransferMessa
 
             // Log status when 60 seconds have passed since last time
             if start.elapsed().as_secs() >= 60 {
-                info!("Active transfers: ");
+                info!(
+                    "Active transfers: {}",
+                    list_transfer_response.transfers.len()
+                );
                 list_transfer_response
                     .transfers
                     .iter()
