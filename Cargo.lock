@@ -1595,7 +1595,7 @@ dependencies = [
 
 [[package]]
 name = "putioarr"
-version = "0.5.13"
+version = "0.5.14"
 dependencies = [
  "actix-rt",
  "actix-web",
