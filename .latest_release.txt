@@ -1,2 +1,2 @@
-# 0.5.14
-Better status when logging
+# 0.5.15
+Fix bug when watching for seeding
