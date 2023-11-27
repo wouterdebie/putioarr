@@ -160,8 +160,8 @@ async fn watch_seeding(app_data: Data<AppData>, transfer: Transfer) -> Result<()
             };
             break;
         }
+        sleep(Duration::from_secs(app_data.config.polling_interval)).await;
     }
-    sleep(Duration::from_secs(app_data.config.polling_interval)).await;
 
     info!("{}: done seeding", transfer);
     Ok(())
