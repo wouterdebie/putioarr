@@ -1,2 +1,2 @@
-# 0.5.15
-Fix bug when watching for seeding
+# 0.5.16
+Missing default hash. Fixes #3
