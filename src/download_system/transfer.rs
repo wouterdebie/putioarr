@@ -105,7 +105,8 @@ impl Transfer {
 
 impl Display for Transfer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let hash = &self.hash.as_ref().unwrap()[..4];
+        let default = "0000".to_string();
+        let hash = &self.hash.as_ref().unwrap_or(&default)[..4];
         let s = format!("[{}: {}]", hash, self.name).cyan();
         write!(f, "{s}")
     }
