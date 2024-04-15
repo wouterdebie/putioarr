@@ -1,2 +1,5 @@
-# 0.5.16
-Missing default hash. Fixes #3
+# 0.5.17
+Merge pull request #10 from arrizer/fix-cargo-toml-nix-features
+
+Declare fs and user features for nix dependency
+Declare fs and user features for nix dependency
