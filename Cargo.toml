@@ -29,7 +29,7 @@ in-container = "1.1.0"
 lava_torrent = "0.11.1"
 log = "0.4.20"
 magnet-url = "2.0.0"
-nix = "0.27.1"
+nix = { version = "0.27.1", features = ["fs", "user"] }
 reqwest = { version = "0.11", default-features = false, features = [
     "json",
     "multipart",
