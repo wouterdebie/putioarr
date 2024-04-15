@@ -1,2 +1,2 @@
-# 0.5.18
-Updated dependencies
+# 0.5.19
+Adds explicit ahash dependency in order to circumvent yanked version
