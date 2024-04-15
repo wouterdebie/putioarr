@@ -14,14 +14,14 @@ actix-rt = "2.9.0"
 actix-web = "4"
 actix-web-httpauth = "0.8.0"
 anyhow = "1.0"
-async-channel = "1.9.0"
+async-channel = "2.2.1"
 async-recursion = "1.0.5"
-base64 = "0.21.4"
+base64 = "0.22.0"
 chrono = "0.4.30"
 clap = { version = "4.4.3", features = ["derive", "env"] }
 colored = "2"
 directories = "5.0"
-env_logger = "0.10.0"
+env_logger = "0.11.3"
 figment = { version = "0.10.10", features = ["toml"] }
 file-owner = "0.1.2"
 futures = "0.3.28"
@@ -29,8 +29,8 @@ in-container = "1.1.0"
 lava_torrent = "0.11.1"
 log = "0.4.20"
 magnet-url = "2.0.0"
-nix = { version = "0.27.1", features = ["fs", "user"] }
-reqwest = { version = "0.11", default-features = false, features = [
+nix = { version = "0.28.0", features = ["fs", "user"] }
+reqwest = { version = "0.12.3", default-features = false, features = [
     "json",
     "multipart",
     "stream",
