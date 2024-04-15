@@ -11,8 +11,9 @@ edition = "2021"
 
 [dependencies]
 actix-rt = "2.9.0"
-actix-web = "4"
+actix-web = "4.5.1"
 actix-web-httpauth = "0.8.0"
+ahash = "=0.8.11"
 anyhow = "1.0"
 async-channel = "2.2.1"
 async-recursion = "1.0.5"
