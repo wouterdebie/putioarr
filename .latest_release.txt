@@ -1,5 +1,2 @@
-# 0.5.17
-Merge pull request #10 from arrizer/fix-cargo-toml-nix-features
-
-Declare fs and user features for nix dependency
-Declare fs and user features for nix dependency
+# 0.5.18
+Updated dependencies
