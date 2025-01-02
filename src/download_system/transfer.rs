@@ -18,7 +18,7 @@ use tokio::time::sleep;
 #[derive(Clone)]
 pub struct Transfer {
     pub name: String,
-    pub file_id: Option<u64>,
+    pub file_id: Option<i64>,
     pub hash: Option<String>,
     pub transfer_id: u64,
     pub targets: Option<Vec<DownloadTarget>>,
@@ -115,7 +115,7 @@ impl Display for Transfer {
 #[async_recursion]
 async fn recurse_download_targets(
     app_data: &Data<AppData>,
-    file_id: u64,
+    file_id: i64,
     hash: &str,
     override_base_path: Option<String>,
     top_level: bool,

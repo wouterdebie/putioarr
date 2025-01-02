@@ -75,8 +75,8 @@ impl Worker {
 
                     // Check if all are success
                     if all_downloaded.iter().all(|d| match d {
-                        DownloadDoneStatus::Success(_) => true,
-                        DownloadDoneStatus::Failed(_) => false,
+                        DownloadDoneStatus::Success => true,
+                        DownloadDoneStatus::Failed => false,
                     }) {
                         info!("{}: download {}", t, "done".blue());
                         self.tx

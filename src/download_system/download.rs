@@ -34,8 +34,8 @@ impl Worker {
 
             // Download the target
             let done_status = match download_target(&self.app_data, &dtm.download_target).await {
-                Ok(_) => DownloadDoneStatus::Success(dtm.download_target),
-                Err(_) => DownloadDoneStatus::Failed(dtm.download_target),
+                Ok(_) => DownloadDoneStatus::Success,
+                Err(_) => DownloadDoneStatus::Failed,
             };
             dtm.tx.send(done_status).await?;
         }
@@ -99,6 +99,6 @@ pub struct DownloadTargetMessage {
 
 #[derive(Debug, Clone)]
 pub enum DownloadDoneStatus {
-    Success(DownloadTarget),
-    Failed(DownloadTarget),
+    Success,
+    Failed,
 }

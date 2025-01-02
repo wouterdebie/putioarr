@@ -23,12 +23,11 @@ pub struct PutIOTransfer {
     pub size: Option<i64>,
     pub downloaded: Option<i64>,
     pub finished_at: Option<String>,
-    pub estimated_time: Option<u64>,
+    pub estimated_time: Option<i64>,
     pub status: String,
     pub started_at: Option<String>,
     pub error_message: Option<String>,
-    pub file_id: Option<u64>,
-    pub percent_done: Option<u16>,
+    pub file_id: Option<i64>,
     pub userfile_exists: bool,
 }
 
@@ -40,15 +39,6 @@ impl PutIOTransfer {
 
 #[derive(Debug, Deserialize)]
 pub struct AccountInfoResponse {
-    pub info: Info,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct Info {
-    pub user_id: u32,
-    pub username: String,
-    pub mail: String,
-    pub monthly_bandwidth_usage: u64,
 }
 
 pub async fn account_info(api_token: &str) -> Result<AccountInfoResponse> {
@@ -135,7 +125,7 @@ pub async fn remove_transfer(api_token: &str, transfer_id: u64) -> Result<()> {
     Ok(())
 }
 
-pub async fn delete_file(api_token: &str, file_id: u64) -> Result<()> {
+pub async fn delete_file(api_token: &str, file_id: i64) -> Result<()> {
     let client = reqwest::Client::new();
     let form = multipart::Form::new().text("file_ids", file_id.to_string());
     let response = client
@@ -211,12 +201,12 @@ pub struct ListFileResponse {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FileResponse {
     pub content_type: String,
-    pub id: u64,
+    pub id: i64,
     pub name: String,
     pub file_type: String,
 }
 
-pub async fn list_files(api_token: &str, file_id: u64) -> Result<ListFileResponse> {
+pub async fn list_files(api_token: &str, file_id: i64) -> Result<ListFileResponse> {
     let client = reqwest::Client::new();
     let response = client
         .get(format!(
@@ -243,7 +233,7 @@ pub struct URLResponse {
     pub url: String,
 }
 
-pub async fn url(api_token: &str, file_id: u64) -> Result<String> {
+pub async fn url(api_token: &str, file_id: i64) -> Result<String> {
     let client = reqwest::Client::new();
     let response = client
         .get(format!("https://api.put.io/v2/files/{}/url", file_id))

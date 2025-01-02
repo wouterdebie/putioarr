@@ -59,7 +59,7 @@ pub struct TransmissionTorrent {
     pub total_size: i64,
     pub left_until_done: i64,
     pub is_finished: bool,
-    pub eta: u64,
+    pub eta: i64,
     pub status: TransmissionTorrentStatus,
     pub seconds_downloading: i64,
     pub error_string: Option<String>,

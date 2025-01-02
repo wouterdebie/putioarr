@@ -5,8 +5,6 @@ use std::collections::HashMap;
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct ArrHistoryResponse {
-    pub page: u32,
-    pub page_size: u32,
     pub total_records: u32,
     pub records: Vec<ArrHistoryRecord>,
 }
