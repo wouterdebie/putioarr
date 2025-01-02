@@ -4,7 +4,7 @@ description = "put.io to sonarr/radarr/whisparr proxy"
 authors = ["Wouter de Bie <wouter@evenflow.nl"]
 repository = "https://github.com/wouterdebie/putioarr"
 license = "MIT"
-version = "0.5.19"
+version = "0.5.20"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
