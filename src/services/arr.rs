@@ -34,7 +34,7 @@ pub async fn check_imported(target: &str, api_key: &str, base_url: &str) -> Resu
 
         let bytes = response.bytes().await?;
         let json: serde_json::Result<ArrHistoryResponse> = serde_json::from_slice(&bytes);
-        if !json.is_ok() {
+        if json.is_err() {
             bail!("url: {url}, status: {status}, body: {bytes:?}");
         }
         let history_response: ArrHistoryResponse = json?;
