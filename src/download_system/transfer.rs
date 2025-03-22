@@ -53,7 +53,7 @@ impl Transfer {
                 let service_result = match arr::check_imported(&target.to, key, url).await {
                     Ok(r) => r,
                     Err(e) => {
-                        error!("Error retrieving history form {}: {}", service_name, e);
+                        error!("Error retrieving history from {}: {}", service_name, e);
                         false
                     }
                 };

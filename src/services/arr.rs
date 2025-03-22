@@ -26,11 +26,18 @@ pub async fn check_imported(target: &str, api_key: &str, base_url: &str) -> Resu
 
         let response = client.get(&url).header("X-Api-Key", api_key).send().await?;
 
-        if !response.status().is_success() {
-            bail!("url: {}, status: {}", url, response.status());
+        let status = response.status();
+
+        if !status.is_success() {
+            bail!("url: {}, status: {}", url, status);
         }
 
-        let history_response: ArrHistoryResponse = response.json().await?;
+        let bytes = response.bytes().await?;
+        let json: serde_json::Result<ArrHistoryResponse> = serde_json::from_slice(&bytes);
+        if !json.is_ok() {
+            bail!("url: {url}, status: {status}, body: {bytes:?}");
+        }
+        let history_response: ArrHistoryResponse = json?;
 
         for record in history_response.records {
             if record.event_type == "downloadFolderImported"
