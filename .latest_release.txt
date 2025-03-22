@@ -1,5 +1,21 @@
-# 0.5.20
-Fix estimated_time which can be -1. This also makes file_id and percent_done signed integers, just in case.
-This also cleans up some dead code and updates some dependencies
+# 0.5.21
+Changes !json.is_ok() to json.is_err()
 
-Fixes #13
+Merge pull request #14 from breadwillow/error-typo
+
+Fix typo in error string and make it more verbose
+Fix typo in error string and make it more verbose
+
+Before:
+
+[2025-03-22T19:24:18Z ERROR] Error retrieving history from Sonarr: error decoding response body
+[2025-03-22T19:24:18Z ERROR] Error retrieving history from Sonarr: error decoding response body
+[2025-03-22T19:24:18Z ERROR] Error retrieving history from Sonarr: error decoding response body
+[2025-03-22T19:24:18Z ERROR] Error retrieving history from Sonarr: error decoding response body
+[2025-03-22T19:24:18Z ERROR] Error retrieving history from Sonarr: error decoding response body
+
+After:
+
+[2025-03-22T19:36:57Z ERROR] Error retrieving history from Sonarr: url: http://sonarr:8989/sonarr/api/v3/history?includeSeries=false&includeEpisode=false&page=0&pageSize=1000, status: 200 OK, body: b"<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/><meta name=\"theme-color\" content=\"#3a3f51\"/><meta name=\"msapplication-navbutton-color\" content=\"#3a3f51\"/><meta name=\"mobile-web-app-capable\" content=\"yes\"/><meta name=\"apple-mobile-web-app-capable\" content=\"yes\"/><meta name=\"apple-mobile-web-app-status-bar-style\" content=\"black-translucent\"/><meta name=\"format-detection\" content=\"telephone=no\"><meta name=\"description\" content=\"Sonarr\"/><link rel=\"apple-touch-icon\" sizes=\"180x180\" href=\"/Content/Images/Icons/apple-touch-icon.png?h=d+iS4xWxn2A2bjUwrERmSg\"/><link rel=\"icon\" type=\"image/png\" sizes=\"32x32\" href=\"/Content/Images/Icons/favicon-32x32.png?h=s64FHSxrh1sgZCiBBIVikQ\"/><link rel=\"icon\" type=\"image/png\" sizes=\"16x16\" href=\"/Content/Images/Icons/favicon-16x16.png?h=wksVbPqhKGB2B5P0O0h8IQ\"/><link rel=\"manifest\" href=\"/Content/manifest.json?h=ha7Qimh4kpwwtF1t/N273Q\" crossorigin=\"use-credentials\"/><link rel=\"mask-icon\" href=\"/Content/Images/Icons/safari-pinned-tab.svg?h=00yLx0v47nGMoh9FRbDFkg\" color=\"#00ccff\"/><link rel=\"shortcut icon\" type=\"image/ico\" href=\"/favicon.ico\"/><meta name=\"msapplication-config\" content=\"/Content/browserconfig.xml\"/><link rel=\"stylesheet\" href=\"/Content/Fonts/fonts.css?h=zGLiHXGOeD2wslXPvUJgKA\"><script>window.Sonarr = {\n        urlBase: ''\n      };</script><script src=\"/index-69f04291ec6271a9edca.js\"></script><link href=\"/Content/styles.css?h=zd/NtvlL8ktbpoBZYtb1Yw\" rel=\"stylesheet\"><title>Sonarr</title><style>.root {\n        overflow: hidden;\n        height: 100%; /* needed for proper layout */\n      }\n\n      @media only screen and (max-width: 768px) {\n        .root {\n          display: flex;\n          flex-direction: column;\n          min-height: 100%;\n          height: auto;\n        }\n      }</style></head><body><div id=\"portal-root\"></div><div id=\"root\" class=\"root\"></div></body></html>"
+
+First time writing Rust, sorry if it's not idiomatic.
