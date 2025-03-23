@@ -221,10 +221,17 @@ pub async fn produce_transfers(app_data: Data<AppData>, tx: Sender<TransferMessa
         .await?
         .transfers
     {
+        let name = putio_transfer.name.clone().unwrap_or("??".to_string());
         let mut transfer = Transfer::from(app_data.clone(), putio_transfer);
         if putio_transfer.is_downloadable() {
-            let targets = transfer.get_download_targets().await?;
-            transfer.targets = Some(targets);
+            info!("Getting download target for {name}");
+            let targets = transfer.get_download_targets().await;
+            if targets.is_err() {
+                // For example, if the user trashed the file in Putio
+                warn!("Could not get target for {name}");
+                continue;
+            }
+            transfer.targets = Some(targets?);
             if transfer.is_imported().await {
                 info!("{}: already imported", &transfer);
                 seen.push(transfer.transfer_id);
