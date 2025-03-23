@@ -1,2 +1,5 @@
-# 0.5.22
-Update upload/download actions
+# 0.5.23
+Merge pull request #15 from breadwillow/skip
+
+Skip transfers that we can't get a file for
+Skip transfers that we can't get a file for (e.g. you trashed the file but it's still seeding)
