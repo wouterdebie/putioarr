@@ -1,5 +1,1 @@
-# 0.5.23
-Merge pull request #15 from breadwillow/skip
-
-Skip transfers that we can't get a file for
-Skip transfers that we can't get a file for (e.g. you trashed the file but it's still seeding)
+# 0.5.24
