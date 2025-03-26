@@ -86,14 +86,14 @@ jobs:
       - name: Export digest (tag)
         if: startsWith(github.ref, 'refs/tags/')
         run: |
-            mkdir -p /tmp/digests
+            mkdir -p /tmp/digests/linux
             digest="${{ steps.build_tag.outputs.digest }}"
             echo "$digest" > "/tmp/digests/${{ matrix.platform }}.digest"
 
       - name: Export digest (branch)
         if: startsWith(github.ref, 'refs/heads/')
         run: |
-            mkdir -p /tmp/digests
+            mkdir -p /tmp/digests/linux
             digest="${{ steps.build_branch.outputs.digest }}"
             echo "$digest" > "/tmp/digests/${{ matrix.platform }}.digest"
 
