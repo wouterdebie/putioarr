@@ -1,2 +1,2 @@
-# 0.5.25
-Change in build process: upload digests later
+# 0.5.26
+Fix in build
