@@ -97,11 +97,7 @@ jobs:
             digest="${{ steps.build_branch.outputs.digest }}"
             echo "$digest" > "/tmp/digests/${{ matrix.platform }}.digest"
 
-  upload_digests:
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - name: Upload digest
+      - name: Upload digests
         uses: actions/upload-artifact@v4
         with:
           name: digests
@@ -111,8 +107,6 @@ jobs:
 
   merge:
     runs-on: ubuntu-latest
-    needs:
-      - upload_digests
     steps:
       - name: Download digests
         uses: actions/download-artifact@v4
