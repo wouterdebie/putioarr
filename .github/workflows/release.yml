@@ -90,6 +90,12 @@ jobs:
           name=$(echo -n "${{ matrix.platform }}" | sed -e 's/[ \t:\/\\"<>|*?]/-/g' -e 's/--*/-/g')
           echo "ARTIFACT_NAME=$name" >> $GITHUB_ENV
 
+          - name: Prepare a unique name for Artifacts
+          id: prep_artifact_name
+          run: |
+            name=$(echo -n "${{ matrix.platform }}" | sed -e 's/[ \t:\/\\"<>|*?]/-/g' -e 's/--*/-/g')
+            echo "artifact_name=$name" >> $GITHUB_OUTPUT
+
       - name: Export digest (tag)
         if: startsWith(github.ref, 'refs/tags/')
         run: |
@@ -107,7 +113,7 @@ jobs:
       - name: Upload digests
         uses: actions/upload-artifact@v4
         with:
-          name: "digest-${{ env.ARTIFACT_NAME }}"
+          name: "digest-${{ steps.prep_artifact_name.outputs.artifact_name }}"
           path: /tmp/digests/linux/*
           if-no-files-found: error
           retention-days: 1
@@ -120,7 +126,7 @@ jobs:
       - name: Download digests
         uses: actions/download-artifact@v4
         with:
-          name:  "digest-${{ env.ARTIFACT_NAME }}"
+          name:  "digest-${{ needs.build.outputs.prep_artifact_name.artifact_name }}"
           path: /tmp/digests
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
