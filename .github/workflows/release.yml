@@ -83,6 +83,13 @@ jobs:
           cache-from: type=gha,scope=build-${{ matrix.platform }}
           cache-to: type=gha,mode=max,scope=build-${{ matrix.platform }}
 
+      - name: Prepare a unique name for Artifacts
+        id: prep_artifact_name
+        run: |
+          # The option to enable + in sed regexps differs by OS so we avoid it
+          name=$(echo -n "${{ matrix.platform }}" | sed -e 's/[ \t:\/\\"<>|*?]/-/g' -e 's/--*/-/g')
+          echo "ARTIFACT_NAME=$name" >> $GITHUB_ENV
+
       - name: Export digest (tag)
         if: startsWith(github.ref, 'refs/tags/')
         run: |
@@ -100,7 +107,7 @@ jobs:
       - name: Upload digests
         uses: actions/upload-artifact@v4
         with:
-          name: "digest:${{ matrix.platform }}"
+          name: "digest-${{ env.ARTIFACT_NAME }}"
           path: /tmp/digests/linux/*
           if-no-files-found: error
           retention-days: 1
