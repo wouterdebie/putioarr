@@ -1,5 +1,5 @@
 
-FROM --platform=$BUILDPLATFORM rust:latest as builder
+FROM --platform=$BUILDPLATFORM rust:latest AS builder
 ARG TARGETARCH
 WORKDIR /usr/src
 
