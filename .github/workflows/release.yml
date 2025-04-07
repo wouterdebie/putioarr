@@ -60,17 +60,12 @@ jobs:
           echo "TAGS=$TAGS" >> $GITHUB_OUTPUT
 
       - name: Build and push Docker image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ${{ env.DOCKERFILE_PATH }}
           platforms: ${{ matrix.platform }}
           push: true
           tags: ${{ steps.docker_tags.outputs.TAGS }}
-          labels: |
-            org.opencontainers.image.created=${{ github.event.inputs.timestamp || github.event.head_commit.timestamp }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}/tree/${{ github.sha }}
-            org.opencontainers.image.title=${{ env.REGISTRY_IMAGE }}
-          cache-from: type=gha,scope=${{ matrix.platform }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
+          build-args: |
+            TARGETPLATFORM=${{ matrix.platform }}

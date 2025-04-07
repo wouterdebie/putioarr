@@ -1,5 +1,5 @@
-
-FROM --platform=$BUILDPLATFORM rust:latest AS builder
+FROM rust:latest AS builder
+ARG TARGETPLATFORM
 ARG TARGETARCH
 WORKDIR /usr/src
 
@@ -19,7 +19,7 @@ COPY .cargo/ /usr/src/putioarr/.cargo/
 WORKDIR /usr/src/putioarr
 
 # Cache dependency build
-RUN /usr/local/bin/build.sh
+RUN TARGETPLATFORM=$TARGETPLATFORM TARGETARCH=$TARGETARCH /usr/local/bin/build.sh
 
 # Now copy in the rest of the sources
 COPY src /usr/src/putioarr/src/
@@ -28,11 +28,12 @@ COPY src /usr/src/putioarr/src/
 RUN touch /usr/src/putioarr/src/main.rs
 
 # This is the actual application build.
-RUN /usr/local/bin/build.sh -c /usr/bin
+RUN TARGETPLATFORM=$TARGETPLATFORM TARGETARCH=$TARGETARCH /usr/local/bin/build.sh -c /usr/bin
 
-### Rutime
+### Runtime
 
-FROM --platform=$BUILDPLATFORM ghcr.io/linuxserver/baseimage-alpine:edge
+FROM ghcr.io/linuxserver/baseimage-alpine:edge
+ARG TARGETPLATFORM
 ARG TARGETARCH
 
 # set version label
@@ -40,13 +41,14 @@ ARG BUILD_DATE
 ARG VERSION
 
 LABEL maintainer="wouterdebie"
+LABEL org.opencontainers.image.architecture="${TARGETARCH}"
 
 RUN apk add musl gcc gcompat
 COPY --from=builder /usr/bin/putioarr /usr/bin
 
-# add local files
+# add local files
 COPY root/ /
 
-# ports and volumes
+# ports and volumes
 EXPOSE 9091
 VOLUME /config
