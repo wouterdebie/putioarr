@@ -1,6 +1,6 @@
 # putioarr
 
-Proxy that allows put.io to be used as a download client for sonarr/radarr/whisparr. The proxy uses the Transmission protocol.
+Proxy that allows put.io to be used as a download client for sonarr/radarr/whisparr/lidarr. The proxy uses the Transmission protocol.
 
 ## Installation
 
@@ -14,10 +14,10 @@ Make sure you have a [proper rust installation](https://www.rust-lang.org/tools/
 
 First, generate a config using `putio generate-config`. This will generate a config file in `~/.config/putioarr/config.toml`. Use `-c` to override the configuration file location.
 
-Edit the configuration file and make sure you configure the username and password, as well as the sonarr/radarr/whisparr details.
+Edit the configuration file and make sure you configure the username and password, as well as the sonarr/radarr/whisparr/lidarr details.
 
 - Run the proxy:`putioarr run`
-- Configure the Transmission download client in sonarr/radarr/whisparr:
+- Configure the Transmission download client in sonarr/radarr/whisparr/lidarr:
     - Url Base: /transmission
     - Username: <configured username>
     - Password: <configured password>
@@ -29,7 +29,7 @@ Docker images are based on [linuxserver.io](https://linuxserver.io) images.
 
 #### Usage
 
-The first time you run your docker container, run it without the `-d` option, since you'll need a put.io API key. When no configuration is found, it will present you a link and a code that will generate an API key. After the key is generated, putioarr will write a default config in your config volume (see `docker compose` and `docker cli` below). Modify the config (like username, password and sonarr/radarr/whisparr configuration) in order to properly use putioarr.
+The first time you run your docker container, run it without the `-d` option, since you'll need a put.io API key. When no configuration is found, it will present you a link and a code that will generate an API key. After the key is generated, putioarr will write a default config in your config volume (see `docker compose` and `docker cli` below). Modify the config (like username, password and sonarr/radarr/whisparr/lidarr configuration) in order to properly use putioarr.
 
 #### Supported Architectures
 
@@ -88,7 +88,7 @@ Container images are configured using parameters passed at runtime (such as thos
 
 
 ## Behavior
-The proxy will upload torrents or magnet links to put.io. It will then continue to monitor transfers. When a transfer is completed, all files belonging to the transfer will be downloaded to the specified download directory. The proxy will remove the files after sonarr/radarr/whisparr has imported them and put.io is done seeding. The proxy will skip directories named "Sample".
+The proxy will upload torrents or magnet links to put.io. It will then continue to monitor transfers. When a transfer is completed, all files belonging to the transfer will be downloaded to the specified download directory. The proxy will remove the files after sonarr/radarr/whisparr/lidarr has imported them and put.io is done seeding. The proxy will skip directories named "Sample".
 
 ## Configuration
 A configuration file can be specified using `-c`, but the default configuration file location is:
@@ -97,12 +97,12 @@ A configuration file can be specified using `-c`, but the default configuration 
 
 TOML is used as the configuration format:
 ```
-# Required. Username and password that sonarr/radarr/whisparr use to connect to the proxy
+# Required. Username and password that sonarr/radarr/whisparr/lidarr use to connect to the proxy
 username = "myusername"
 password = "mypassword"
 
 # Required. Directory where the proxy will download files to. This directory has to be readable by
-# sonarr/radarr/whisparr in order to import downloads
+# sonarr/radarr/whisparr/lidarr in order to import downloads
 download_directory = "/path/to/downloads"
 
 # Optional bind address, default "0.0.0.0"
@@ -150,7 +150,7 @@ api_key = "MYRADARRAPIKEY"
 - Better Error handling and retry behavior
 - The session ID provided is hard coded. Not sure if it matters.
 - (Add option to not delete downloads)
-- Figure out a better way to map a transfer to a completed import. Since a transfer can contain multiple files (e.g. a whole season) we currently check if all video files have been imported. Most of the time this is fine, except when there are sample videos. sonarr/radarr/whisparr will not import samples, but will make no mention of the fact that the sample was skipped. Right now we check against the `skip_directories` list, which works, but might be tedious.
+- Figure out a better way to map a transfer to a completed import. Since a transfer can contain multiple files (e.g. a whole season) we currently check if all video files have been imported. Most of the time this is fine, except when there are sample videos. sonarr/radarr/whisparr/lidarr will not import samples, but will make no mention of the fact that the sample was skipped. Right now we check against the `skip_directories` list, which works, but might be tedious.
 - Automatically pick the right putio proxy based on speed
 
 ## Thanks

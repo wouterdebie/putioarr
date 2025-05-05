@@ -16,13 +16,17 @@ pub struct ArrHistoryRecord {
     pub data: HashMap<String, Option<String>>,
 }
 
-pub async fn check_imported(target: &str, api_key: &str, base_url: &str) -> Result<bool> {
+pub async fn check_imported(target: &str, api_key: &str, base_url: &str, is_lidarr: &bool) -> Result<bool> {
     let client = reqwest::Client::new();
     let mut inspected = 0;
     let mut page = 0;
     loop {
-        let url = format!(
+        let mut url = format!(
             "{base_url}/api/v3/history?includeSeries=false&includeEpisode=false&page={page}&pageSize=1000");
+        if *is_lidarr {
+            url = format!(
+                "{base_url}/api/v1/history?includeArtist=false&includeAlbum=false&includeTrack=false&page={page}&pageSize=1000");
+        }
 
         let response = client.get(&url).header("X-Api-Key", api_key).send().await?;
 
@@ -40,7 +44,7 @@ pub async fn check_imported(target: &str, api_key: &str, base_url: &str) -> Resu
         let history_response: ArrHistoryResponse = json?;
 
         for record in history_response.records {
-            if record.event_type == "downloadFolderImported"
+            if (record.event_type == "downloadFolderImported" || record.event_type == "trackFileImported")
                 && record.data["droppedPath"].as_ref().unwrap() == target
             {
                 return Ok(true);

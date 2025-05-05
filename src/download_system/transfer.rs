@@ -10,7 +10,7 @@ use anyhow::Result;
 use async_channel::Sender;
 use async_recursion::async_recursion;
 use colored::*;
-use log::{error, info, warn};
+use log::{error, info, warn, debug};
 use serde::{Deserialize, Serialize};
 use std::{fmt::Display, path::Path};
 use tokio::time::sleep;
@@ -28,15 +28,18 @@ pub struct Transfer {
 impl Transfer {
     pub async fn is_imported(&self) -> bool {
         let targets = self.targets.as_ref().unwrap().clone();
-        let mut check_services = Vec::<(&str, String, String)>::new();
+        let mut check_services = Vec::<(&str, String, String, bool)>::new();
         if let Some(a) = &self.app_data.config.sonarr {
-            check_services.push(("Sonarr", a.url.clone(), a.api_key.clone()))
+            check_services.push(("Sonarr", a.url.clone(), a.api_key.clone(), false))
         }
         if let Some(a) = &self.app_data.config.radarr {
-            check_services.push(("Radarr", a.url.clone(), a.api_key.clone()))
+            check_services.push(("Radarr", a.url.clone(), a.api_key.clone(), false))
         }
         if let Some(a) = &self.app_data.config.whisparr {
-            check_services.push(("Whisparr", a.url.clone(), a.api_key.clone()))
+            check_services.push(("Whisparr", a.url.clone(), a.api_key.clone(), false))
+        }
+        if let Some(a) = &self.app_data.config.lidarr {
+            check_services.push(("Lidarr", a.url.clone(), a.api_key.clone(), true))
         }
 
         let targets = targets
@@ -49,8 +52,8 @@ impl Transfer {
         let mut results = Vec::<bool>::new();
         for target in targets {
             let mut service_results = vec![];
-            for (service_name, url, key) in &check_services {
-                let service_result = match arr::check_imported(&target.to, key, url).await {
+            for (service_name, url, key, is_lidarr) in &check_services {
+                let service_result = match arr::check_imported(&target.to, key, url, is_lidarr).await {
                     Ok(r) => r,
                     Err(e) => {
                         error!("Error retrieving history from {}: {}", service_name, e);
@@ -66,7 +69,6 @@ impl Transfer {
                 }
                 service_results.push(service_result)
             }
-            // Check if ANY of the service_results are true and put the outcome in results
             results.push(service_results.into_iter().any(|x| x));
         }
         // Check if all targets have been imported
@@ -159,7 +161,7 @@ async fn recurse_download_targets(
                 }
             }
         }
-        "VIDEO" => {
+        "VIDEO" | "AUDIO" => {
             // Get download URL for file
             let url = putio::url(&app_data.config.putio.api_key, response.parent.id).await?;
             targets.push(DownloadTarget {
@@ -170,7 +172,9 @@ async fn recurse_download_targets(
                 transfer_hash: hash.to_string(),
             });
         }
-        _ => {}
+        _ => {
+            debug!("{}: skipping filetype {}", response.parent.name, response.parent.file_type.as_str());
+        }
     }
 
     Ok(targets)

@@ -58,6 +58,7 @@ pub struct Config {
     sonarr: Option<ArrConfig>,
     radarr: Option<ArrConfig>,
     whisparr: Option<ArrConfig>,
+    lidarr: Option<ArrConfig>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]

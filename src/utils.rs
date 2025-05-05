@@ -55,9 +55,14 @@ url = "http://myradarrhost:7878/radarr"
 api_key = "MYRADARRAPIKEY"
 
 [whisparr]
-url = "http://mywhisparrhost:6969/radarr"
+url = "http://mywhisparrhost:6969/whisparr"
 # Can be found in Settings -> General
 api_key = "MYWHISPARRAPIKEY"
+
+[lidarr]
+url = "http://mylidarrhost:6969/lidarr"
+# Can be found in Settings -> General
+api_key = "MYLIDARRAPIKEY"
 
 "#;
 
