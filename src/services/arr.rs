@@ -1,4 +1,4 @@
-use crate::{Config, download_system::transfer};
+use crate::{download_system::transfer, Config};
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -61,7 +61,11 @@ impl ArrApp {
             apps.push(Self::new(ArrAppType::Sonarr, c, transfer::MediaType::Video));
         }
         if let Some(c) = &config.whisparr {
-            apps.push(Self::new(ArrAppType::Whisparr, c, transfer::MediaType::Video));
+            apps.push(Self::new(
+                ArrAppType::Whisparr,
+                c,
+                transfer::MediaType::Video,
+            ));
         }
         apps
     }
@@ -95,7 +99,7 @@ impl ArrApp {
                 } else {
                     Ok(true)
                 }
-            },
+            }
             None => {
                 bail!("Cannot check files with no media type: {}", target);
             }
@@ -104,7 +108,7 @@ impl ArrApp {
 
     pub async fn check_imported(&self, target: &transfer::DownloadTarget) -> Result<bool> {
         if !self.should_handle(target)? {
-            return Ok(false)
+            return Ok(false);
         }
         let mut inspected = 0;
         let mut page = 0;
