@@ -41,7 +41,7 @@ impl Transfer {
         for target in targets {
             let mut service_results = vec![];
             for app in &apps {
-                let service_result = match app.check_imported(&target.to).await {
+                let service_result = match app.check_imported(&target).await {
                     Ok(r) => r,
                     Err(e) => {
                         error!("Error retrieving history from {}: {}", app, e);
@@ -129,6 +129,7 @@ async fn recurse_download_targets(
                     to,
                     top_level,
                     transfer_hash: hash.to_string(),
+                    media_type: None,
                 });
 
                 for file in response.files {
@@ -154,6 +155,7 @@ async fn recurse_download_targets(
                 to,
                 top_level,
                 transfer_hash: hash.to_string(),
+                media_type: MediaType::from_file_type_str(response.parent.file_type.as_str()),
             });
         }
         _ => {
@@ -175,6 +177,22 @@ pub enum TransferMessage {
     Imported(Transfer),
 }
 
+#[derive(PartialEq, Debug, Serialize, Deserialize, Clone)]
+pub enum MediaType {
+    Audio,
+    Video,
+}
+
+impl MediaType {
+    pub fn from_file_type_str(file_type: &str) -> Option<Self> {
+        match file_type {
+            "AUDIO" => Some(Self::Audio),
+            "VIDEO" => Some(Self::Video),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DownloadTarget {
     pub from: Option<String>,
@@ -182,6 +200,7 @@ pub struct DownloadTarget {
     pub target_type: TargetType,
     pub top_level: bool,
     pub transfer_hash: String,
+    pub media_type: Option<MediaType>,
 }
 
 impl Display for DownloadTarget {
