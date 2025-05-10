@@ -1,6 +1,6 @@
 use crate::{
     services::{
-        arr,
+        arr::ArrApp,
         putio::{self, PutIOTransfer},
     },
     AppData,
@@ -10,7 +10,7 @@ use anyhow::Result;
 use async_channel::Sender;
 use async_recursion::async_recursion;
 use colored::*;
-use log::{error, info, warn, debug};
+use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::{fmt::Display, path::Path};
 use tokio::time::sleep;
@@ -28,19 +28,7 @@ pub struct Transfer {
 impl Transfer {
     pub async fn is_imported(&self) -> bool {
         let targets = self.targets.as_ref().unwrap().clone();
-        let mut check_services = Vec::<(&str, String, String, bool)>::new();
-        if let Some(a) = &self.app_data.config.sonarr {
-            check_services.push(("Sonarr", a.url.clone(), a.api_key.clone(), false))
-        }
-        if let Some(a) = &self.app_data.config.radarr {
-            check_services.push(("Radarr", a.url.clone(), a.api_key.clone(), false))
-        }
-        if let Some(a) = &self.app_data.config.whisparr {
-            check_services.push(("Whisparr", a.url.clone(), a.api_key.clone(), false))
-        }
-        if let Some(a) = &self.app_data.config.lidarr {
-            check_services.push(("Lidarr", a.url.clone(), a.api_key.clone(), true))
-        }
+        let apps = ArrApp::from_config(&self.app_data.config);
 
         let targets = targets
             .into_iter()
@@ -52,20 +40,16 @@ impl Transfer {
         let mut results = Vec::<bool>::new();
         for target in targets {
             let mut service_results = vec![];
-            for (service_name, url, key, is_lidarr) in &check_services {
-                let service_result = match arr::check_imported(&target.to, key, url, is_lidarr).await {
+            for app in &apps {
+                let service_result = match app.check_imported(&target.to).await {
                     Ok(r) => r,
                     Err(e) => {
-                        error!("Error retrieving history from {}: {}", service_name, e);
+                        error!("Error retrieving history from {}: {}", app, e);
                         false
                     }
                 };
                 if service_result {
-                    info!(
-                        "{}: found imported by {}",
-                        &target,
-                        service_name.bright_blue()
-                    );
+                    info!("{}: found imported by {}", &target, app);
                 }
                 service_results.push(service_result)
             }
@@ -173,7 +157,11 @@ async fn recurse_download_targets(
             });
         }
         _ => {
-            debug!("{}: skipping filetype {}", response.parent.name, response.parent.file_type.as_str());
+            debug!(
+                "{}: skipping filetype {}",
+                response.parent.name,
+                response.parent.file_type.as_str()
+            );
         }
     }
 
