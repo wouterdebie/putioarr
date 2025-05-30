@@ -1,12 +1,1 @@
-# 0.5.35
-Enable build cache
-
-Try fix build and push with multiple platforms instead of matrix build
-
-Release 0.5.34
-
-Fix build
-
-Release 0.5.33
-
-Fix gh actions
+# 0.5.36
