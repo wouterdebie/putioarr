@@ -38,8 +38,7 @@ impl PutIOTransfer {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct AccountInfoResponse {
-}
+pub struct AccountInfoResponse {}
 
 pub async fn account_info(api_token: &str) -> Result<AccountInfoResponse> {
     let client = reqwest::Client::new();

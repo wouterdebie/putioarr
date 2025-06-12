@@ -50,3 +50,8 @@ api_key = ""
 # url = "http://mywhisparrhost:6969/radarr"
 # Can be found in Radarr: Settings -> General
 # api_key = "MYWHISPARRAPIKEY"
+
+# [lidarr]
+# url = "http://mylidarrhost:6969/lidarr"
+# Can be found in Lidarr: Settings -> General
+# api_key = "MYLIDARRAPIKEY"

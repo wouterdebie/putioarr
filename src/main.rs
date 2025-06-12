@@ -1,4 +1,4 @@
-use crate::{http::routes, services::putio};
+use crate::{http::routes, services::arr, services::putio};
 use actix_web::{web, App, HttpServer};
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
@@ -55,19 +55,14 @@ pub struct Config {
     uid: u32,
     username: String,
     putio: PutioConfig,
-    sonarr: Option<ArrConfig>,
-    radarr: Option<ArrConfig>,
-    whisparr: Option<ArrConfig>,
+    sonarr: Option<arr::ArrConfig>,
+    radarr: Option<arr::ArrConfig>,
+    whisparr: Option<arr::ArrConfig>,
+    lidarr: Option<arr::ArrConfig>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct PutioConfig {
-    api_key: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct ArrConfig {
-    url: String,
     api_key: String,
 }
 

@@ -1,6 +1,6 @@
 use crate::{
     services::{
-        arr,
+        arr::ArrApp,
         putio::{self, PutIOTransfer},
     },
     AppData,
@@ -10,7 +10,7 @@ use anyhow::Result;
 use async_channel::Sender;
 use async_recursion::async_recursion;
 use colored::*;
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::{fmt::Display, path::Path};
 use tokio::time::sleep;
@@ -28,16 +28,7 @@ pub struct Transfer {
 impl Transfer {
     pub async fn is_imported(&self) -> bool {
         let targets = self.targets.as_ref().unwrap().clone();
-        let mut check_services = Vec::<(&str, String, String)>::new();
-        if let Some(a) = &self.app_data.config.sonarr {
-            check_services.push(("Sonarr", a.url.clone(), a.api_key.clone()))
-        }
-        if let Some(a) = &self.app_data.config.radarr {
-            check_services.push(("Radarr", a.url.clone(), a.api_key.clone()))
-        }
-        if let Some(a) = &self.app_data.config.whisparr {
-            check_services.push(("Whisparr", a.url.clone(), a.api_key.clone()))
-        }
+        let apps = ArrApp::from_config(&self.app_data.config);
 
         let targets = targets
             .into_iter()
@@ -49,24 +40,19 @@ impl Transfer {
         let mut results = Vec::<bool>::new();
         for target in targets {
             let mut service_results = vec![];
-            for (service_name, url, key) in &check_services {
-                let service_result = match arr::check_imported(&target.to, key, url).await {
+            for app in &apps {
+                let service_result = match app.check_imported(&target).await {
                     Ok(r) => r,
                     Err(e) => {
-                        error!("Error retrieving history from {}: {}", service_name, e);
+                        error!("Error retrieving history from {}: {}", app, e);
                         false
                     }
                 };
                 if service_result {
-                    info!(
-                        "{}: found imported by {}",
-                        &target,
-                        service_name.bright_blue()
-                    );
+                    info!("{}: found imported by {}", &target, app);
                 }
                 service_results.push(service_result)
             }
-            // Check if ANY of the service_results are true and put the outcome in results
             results.push(service_results.into_iter().any(|x| x));
         }
         // Check if all targets have been imported
@@ -143,6 +129,7 @@ async fn recurse_download_targets(
                     to,
                     top_level,
                     transfer_hash: hash.to_string(),
+                    media_type: None,
                 });
 
                 for file in response.files {
@@ -159,7 +146,7 @@ async fn recurse_download_targets(
                 }
             }
         }
-        "VIDEO" => {
+        "VIDEO" | "AUDIO" => {
             // Get download URL for file
             let url = putio::url(&app_data.config.putio.api_key, response.parent.id).await?;
             targets.push(DownloadTarget {
@@ -168,9 +155,16 @@ async fn recurse_download_targets(
                 to,
                 top_level,
                 transfer_hash: hash.to_string(),
+                media_type: MediaType::from_file_type_str(response.parent.file_type.as_str()),
             });
         }
-        _ => {}
+        _ => {
+            debug!(
+                "{}: skipping filetype {}",
+                response.parent.name,
+                response.parent.file_type.as_str()
+            );
+        }
     }
 
     Ok(targets)
@@ -183,6 +177,22 @@ pub enum TransferMessage {
     Imported(Transfer),
 }
 
+#[derive(PartialEq, Debug, Serialize, Deserialize, Clone)]
+pub enum MediaType {
+    Audio,
+    Video,
+}
+
+impl MediaType {
+    pub fn from_file_type_str(file_type: &str) -> Option<Self> {
+        match file_type {
+            "AUDIO" => Some(Self::Audio),
+            "VIDEO" => Some(Self::Video),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DownloadTarget {
     pub from: Option<String>,
@@ -190,6 +200,7 @@ pub struct DownloadTarget {
     pub target_type: TargetType,
     pub top_level: bool,
     pub transfer_hash: String,
+    pub media_type: Option<MediaType>,
 }
 
 impl Display for DownloadTarget {
