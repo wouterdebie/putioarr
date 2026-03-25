@@ -40,7 +40,7 @@ pub(crate) async fn rpc_post(
         "torrent-set" => None, // Nothing to do here
         "queue-move-top" => None,
         "torrent-remove" => handle_torrent_remove(putio_api_token, &payload).await,
-        "torrent-add" => match handle_torrent_add(putio_api_token, &payload).await {
+        "torrent-add" => match handle_torrent_add(putio_api_token, &payload, &app_data).await {
             Ok(v) => v,
             Err(e) => {
                 error!("{}", e);

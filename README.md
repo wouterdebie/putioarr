@@ -139,12 +139,45 @@ api_key =  "MYPUTIOKEY"
 url = "http://mysonarrhost:8989/sonarr"
 # Can be found in Settings -> General
 api_key = "MYSONARRAPIKEY"
+# Optional: Download to a category-specific subdirectory (e.g., /downloads/tv/)
+# category = "tv"
 
 [radarr]
 url = "http://myradarrhost:7878/radarr"
 # Can be found in Settings -> General
 api_key = "MYRADARRAPIKEY"
+# Optional: Download to a category-specific subdirectory (e.g., /downloads/movies/)
+# category = "movies"
+
+[whisparr]
+url = "http://mywhisparrhost:6969/whisparr"
+# Can be found in Settings -> General
+api_key = "MYWHISPARRAPIKEY"
+# Optional: Download to a category-specific subdirectory (e.g., /downloads/adult/)
+# category = "adult"
 ```
+
+### Category-based Download Directories
+
+To prevent Sonarr/Radarr/Whisparr from seeing each other's downloads, you can configure separate download directories using categories:
+
+1. **In putioarr's config.toml**, add a `category` field to each service:
+   ```toml
+   [sonarr]
+   category = "tv"
+   
+   [radarr]
+   category = "movies"
+   ```
+
+2. **In Sonarr/Radarr/Whisparr's download client settings**, set the same category in the Transmission configuration.
+
+3. Downloads will then be organized into subdirectories:
+   - Sonarr downloads → `/download_directory/tv/`
+   - Radarr downloads → `/download_directory/movies/`
+   - Whisparr downloads → `/download_directory/adult/`
+
+This feature ensures each *arr application only sees and processes its own downloads.
 
 ## TODO:
 - Better Error handling and retry behavior

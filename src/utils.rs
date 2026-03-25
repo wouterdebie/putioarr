@@ -48,16 +48,25 @@ api_key =  "{putio_api_key}"
 url = "http://mysonarrhost:8989/sonarr"
 # Can be found in Settings -> General
 api_key = "MYSONARRAPIKEY"
+# Optional category/subdirectory for Sonarr downloads (e.g., "tv" or "shows")
+# This should match the category configured in Sonarr's download client settings
+category = "tv"
 
 [radarr]
 url = "http://myradarrhost:7878/radarr"
 # Can be found in Settings -> General
 api_key = "MYRADARRAPIKEY"
+# Optional category/subdirectory for Radarr downloads (e.g., "movies")
+# This should match the category configured in Radarr's download client settings
+category = "movies"
 
 [whisparr]
 url = "http://mywhisparrhost:6969/radarr"
 # Can be found in Settings -> General
 api_key = "MYWHISPARRAPIKEY"
+# Optional category/subdirectory for Whisparr downloads (e.g., "adult")
+# This should match the category configured in Whisparr's download client settings
+category = "adult"
 
 "#;
 
