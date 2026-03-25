@@ -2,7 +2,7 @@ use crate::{
     // downloader::DownloadStatus,
     services::putio::{self, PutIOTransfer},
     services::transmission::{TransmissionRequest, TransmissionTorrent},
-    AppData, ArrConfig, Config,
+    AppData, Config,
 };
 use actix_web::web;
 use anyhow::Result;
@@ -67,22 +67,18 @@ pub(crate) async fn handle_torrent_add(
             Ok(t) => {
                 // Store transfer state with the torrent hash
                 // When put.io processes this torrent, it will have the same hash
-                if let Ok(hash_bytes) = t.info_hash() {
-                    // Convert bytes to hex string manually
-                    let hash = hash_bytes.iter()
-                        .map(|byte| format!("{:02x}", byte))
-                        .collect::<String>();
-                    let full_download_dir = if category != "default" {
-                        format!("{}/{}", app_data.config.download_directory, category)
-                    } else {
-                        app_data.config.download_directory.clone()
-                    };
-                    app_data.state.add_transfer(
-                        hash.to_lowercase(),
-                        category.clone(),
-                        full_download_dir
-                    ).await?;
-                }
+                // The info_hash() returns the hash as a String in hex format
+                let hash = t.info_hash();
+                let full_download_dir = if category != "default" {
+                    format!("{}/{}", app_data.config.download_directory, category)
+                } else {
+                    app_data.config.download_directory.clone()
+                };
+                app_data.state.add_transfer(
+                    hash.to_lowercase(),
+                    category.clone(),
+                    full_download_dir
+                ).await?;
                 info!(
                     "{}: torrent uploaded (category: {})",
                     format!("[ffff: {}]", t.name).magenta(),
@@ -181,11 +177,12 @@ pub(crate) async fn handle_torrent_get(
     let transmission_transfers = transfers.into_iter().map(|t| {
         let app_data = app_data.clone();
         async move {
-            let mut tt: TransmissionTorrent = t.clone().into();
+            let hash = t.hash.clone();
+            let mut tt: TransmissionTorrent = t.into();
             // Get the correct download directory from state if available
-            if let Some(hash) = &t.hash {
+            if let Some(h) = &hash {
                 tt.download_dir = app_data.state.get_download_dir_for_transfer(
-                    hash, 
+                    h, 
                     &app_data.config.download_directory
                 ).await;
             } else {
