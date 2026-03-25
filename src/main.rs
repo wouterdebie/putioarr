@@ -15,6 +15,7 @@ use utils::{generate_config, get_token};
 mod download_system;
 mod http;
 mod services;
+mod state;
 mod utils;
 
 /// put.io to sonarr/radarr proxy
@@ -69,10 +70,12 @@ pub struct PutioConfig {
 pub struct ArrConfig {
     url: String,
     api_key: String,
+    category: Option<String>,
 }
 
 pub struct AppData {
     pub config: Config,
+    pub state: state::StateManager,
 }
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -122,6 +125,7 @@ async fn main() -> Result<()> {
 
             let app_data = web::Data::new(AppData {
                 config: config.clone(),
+                state: state::StateManager::new(),
             });
 
             match putio::account_info(&app_data.config.putio.api_key).await {

@@ -120,7 +120,13 @@ async fn recurse_download_targets(
     override_base_path: Option<String>,
     top_level: bool,
 ) -> Result<Vec<DownloadTarget>> {
-    let base_path = override_base_path.unwrap_or(app_data.config.download_directory.clone());
+    // Check if we have stored state for this transfer to get the correct download directory
+    let base_path = if override_base_path.is_some() {
+        override_base_path.unwrap()
+    } else {
+        // Try to get the download directory from state, fallback to default
+        app_data.state.get_download_dir_for_transfer(hash, &app_data.config.download_directory).await
+    };
     let mut targets = Vec::<DownloadTarget>::new();
     let response = putio::list_files(&app_data.config.putio.api_key, file_id).await?;
     let to = Path::new(&base_path)
@@ -255,6 +261,17 @@ pub async fn produce_transfers(app_data: Data<AppData>, tx: Sender<TransferMessa
                     continue;
                 }
                 let transfer = Transfer::from(app_data.clone(), putio_transfer);
+                
+                // Try to match with stored state if we don't have it
+                if let Some(hash) = &putio_transfer.hash {
+                    if app_data.state.get_transfer(hash).await.is_none() {
+                        // No stored state, try to determine category from current config
+                        // This handles transfers that existed before state tracking was implemented
+                        let category = "default".to_string();
+                        let download_dir = app_data.config.download_directory.clone();
+                        app_data.state.add_transfer(hash.clone(), category, download_dir).await.ok();
+                    }
+                }
 
                 info!("{}: ready for download", transfer);
                 tx.send(TransferMessage::QueuedForDownload(transfer))
