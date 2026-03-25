@@ -3,19 +3,7 @@ use reqwest::multipart;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, time::Duration};
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct PutIOAccountInfo {
-    pub username: String,
-    pub mail: String,
-    pub account_active: bool,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct PutIOAccountResponse {
-    pub info: PutIOAccountInfo,
-}
-
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct PutIOTransfer {
     pub id: u64,
     pub hash: Option<String>,
@@ -187,11 +175,6 @@ pub async fn upload_file(api_token: &str, bytes: &[u8]) -> Result<()> {
     // Todo: error if invalid request
     Ok(())
 }
-#[derive(Debug, Serialize, Deserialize)]
-pub struct UrlResponse {
-    pub url: String,
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ListFileResponse {
     pub files: Vec<FileResponse>,

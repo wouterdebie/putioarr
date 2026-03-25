@@ -121,8 +121,8 @@ async fn recurse_download_targets(
     top_level: bool,
 ) -> Result<Vec<DownloadTarget>> {
     // Check if we have stored state for this transfer to get the correct download directory
-    let base_path = if override_base_path.is_some() {
-        override_base_path.unwrap()
+    let base_path = if let Some(path) = override_base_path {
+        path
     } else {
         // Try to get the download directory from state, fallback to default
         app_data.state.get_download_dir_for_transfer(hash, &app_data.config.download_directory).await
