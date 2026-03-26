@@ -1,1 +1,18 @@
-# 0.5.36
+# 0.6.0
+Fix build errors from category-handling PR and clean up warnings
+
+- Fix info_hash() usage: returns String directly, not Result<Vec<u8>>
+- Add Clone derive to PutIOTransfer
+- Remove unused imports (ArrConfig, PathBuf)
+- Remove dead code (PutIOAccountInfo, PutIOAccountResponse, duplicate UrlResponse)
+
+Merge pull request #22 from msmarcal/feature/category-handling
+
+Implement category-specific download directories
+Update documentation for Whisparr and category-based downloads
+
+Add configuration examples and instructions to the README for using the category field to organize downloads into service-specific subdirectories. Also includes a sample configuration for Whisparr.
+
+Implement category-specific download directories
+
+Add a state manager to track transfer hashes and their associated download paths. This allows the proxy to honor the "category" or "download-dir" specified by Sonarr, Radarr, and Whisparr, ensuring files are downloaded into service-specific sub-directories rather than a single global directory.
