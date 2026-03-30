@@ -95,18 +95,18 @@ pub(crate) async fn handle_torrent_add(
                 // Store transfer state with hash from magnet
                 if let Some(xt) = m.xt {
                     // Extract hash from xt (usually in format "urn:btih:HASH")
-                    if let Some(hash) = xt.strip_prefix("urn:btih:") {
-                        let full_download_dir = if category != "default" {
-                            format!("{}/{}", app_data.config.download_directory, category)
-                        } else {
-                            app_data.config.download_directory.clone()
-                        };
-                        app_data.state.add_transfer(
-                            hash.to_lowercase(), 
-                            category.clone(), 
-                            full_download_dir
-                        ).await?;
-                    }
+                    // unless magnet_url::Magnet has already extracted it
+                    let hash = xt.strip_prefix("urn:btih:").unwrap_or(&xt);
+                    let full_download_dir = if category != "default" {
+                        format!("{}/{}", app_data.config.download_directory, category)
+                    } else {
+                        app_data.config.download_directory.clone()
+                    };
+                    app_data.state.add_transfer(
+                        hash.to_lowercase(),
+                        category.clone(),
+                        full_download_dir
+                    ).await?;
                 }
                 if let Some(dn) = m.dn {
                     info!(
