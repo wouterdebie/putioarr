@@ -4,12 +4,17 @@ on:
   push:
     branches:
       - main
+      - "fix/**"
       - "releases/**"
     tags:
       - v*
 
+permissions:
+  contents: read
+  packages: write
+
 env:
-  REGISTRY_IMAGE: ghcr.io/wouterdebie/putioarr
+  REGISTRY_IMAGE: ghcr.io/${{ github.repository_owner }}/putioarr
   DOCKERFILE_PATH: ./docker/Dockerfile
 
 jobs:
@@ -27,7 +32,7 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
-          password: ${{ secrets.CR_PAT }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Determine image tags
         id: docker_tags
@@ -45,6 +50,9 @@ jobs:
           elif [[ "$REF" == refs/heads/releases/* ]]; then
             BRANCH_NAME="${{ github.ref_name }}"
             TAGS="$REGISTRY:${BRANCH_NAME}-latest"
+          elif [[ "$REF" == refs/heads/fix/* ]]; then
+            SLUG="${REF_NAME//\//-}"
+            TAGS="$REGISTRY:${SLUG}"
           else
             TAGS="$REGISTRY:${{ github.sha }}"
           fi

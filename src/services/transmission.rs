@@ -1,6 +1,7 @@
 use chrono::prelude::*;
 use log::warn;
 use serde::{Deserialize, Serialize};
+use serde_repr::Serialize_repr;
 use std::cmp::max;
 
 use super::putio::PutIOTransfer;
@@ -107,7 +108,8 @@ impl From<PutIOTransfer> for TransmissionTorrent {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize_repr)]
+#[repr(u8)]
 pub enum TransmissionTorrentStatus {
     Stopped = 0,
     CheckWait = 1,
