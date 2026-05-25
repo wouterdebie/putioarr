@@ -1,33 +1,16 @@
-# 0.6.2
-Strip trailing slash from *arr base URL\n\nAvoid producing //api/v3/history when the configured url ends with /,
-which some *arr instances respond to with the HTML index page (200 OK)
-instead of the JSON API.
+# 0.6.3
+Add Lidarr support and media-type aware import checks
 
-Support arbitrarily-named *arr instances under [arrs.<name>]
+Lidarr can now be configured via a top-level [lidarr] section or as a typed
+entry under [arrs.<name>] (type = lidarr). Each *arr instance is now
+ tagged with a kind (sonarr/radarr/whisparr/lidarr); Lidarr hits the v1
+ history endpoint and looks for trackFileImported, the others continue to
+ use v3 / downloadFolderImported.
 
-[sonarr]/[radarr]/[whisparr] continue to work as named single instances.
-Additional instances can now be declared as [arrs.foo], [arrs.bar], etc.,
-all using the same v3 history API for import checks. Config.all_arrs()
-yields a unified list; handle_torrent_add and is_imported iterate over it
-so categories and import-check work across every configured instance.
+DownloadTarget now carries an optional MediaType (Audio/Video) derived
+from put.io's file_type. is_imported only queries *arrs whose media type
+matches the target, so audio files are routed to Lidarr and video files
+to Sonarr/Radarr/Whisparr. AUDIO files are now picked up as download
+targets in addition to VIDEO. Other file types are logged at debug level.
 
-Suppress noisy HTTP/runtime crate logs at debug level
-
-Pin actix, reqwest, hyper, rustls, mio, h2, tokio_util and related crates
-  to info level so user-set debug only affects putioarr's own logs.
-
-Improve category/state diagnostics and normalize hash lookups
-
-- Normalize transfer hash to lowercase in all StateManager operations
-  so reads (using put.io's hash casing) match writes (lowercased on add).
-- Log every category determination in handle_torrent_add: incoming
-  download-dir, per-*arr match checks, and the resulting stored state.
-- Stop poisoning state with a synthetic 'default' entry for unknown
-  hashes in produce_transfers; just warn and fall back dynamically.
-
-Handle put.io API errors gracefully in transmission handlers
-
-- Replace .unwrap() calls in handle_torrent_remove and handle_torrent_get
-  with proper error logging to prevent actix arbiter panics on request
-  timeouts.
-- Increase list_transfers timeout from 10s to 30s.
+Adapted from #18 by @gbagnoli.
