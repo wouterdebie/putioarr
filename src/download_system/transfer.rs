@@ -261,15 +261,13 @@ pub async fn produce_transfers(app_data: Data<AppData>, tx: Sender<TransferMessa
                     continue;
                 }
                 let transfer = Transfer::from(app_data.clone(), putio_transfer);
-                
-                // Try to match with stored state if we don't have it
+
                 if let Some(hash) = &putio_transfer.hash {
                     if app_data.state.get_transfer(hash).await.is_none() {
-                        // No stored state, try to determine category from current config
-                        // This handles transfers that existed before state tracking was implemented
-                        let category = "default".to_string();
-                        let download_dir = app_data.config.download_directory.clone();
-                        app_data.state.add_transfer(hash.clone(), category, download_dir).await.ok();
+                        warn!(
+                            "{}: no stored category/download-dir for hash {} — falling back to default download_directory ({}). This transfer was likely uploaded before putioarr started, or arr did not send a download-dir we could match to a category.",
+                            transfer, hash, app_data.config.download_directory
+                        );
                     }
                 }
 

@@ -9,34 +9,38 @@ use anyhow::Result;
 use base64::Engine;
 use colored::Colorize;
 use lava_torrent::torrent::v1::Torrent;
-use log::{error, info};
+use log::{error, info, warn};
 use magnet_url::Magnet;
 use serde_json::json;
 
 fn determine_category(download_dir: &str, config: &Config) -> String {
-    // Check if the download_dir matches any configured category
-    if let Some(sonarr) = &config.sonarr {
-        if let Some(category) = &sonarr.category {
-            if download_dir.contains(category) {
-                return category.clone();
+    let candidates = [
+        ("sonarr", config.sonarr.as_ref().and_then(|c| c.category.as_ref())),
+        ("radarr", config.radarr.as_ref().and_then(|c| c.category.as_ref())),
+        ("whisparr", config.whisparr.as_ref().and_then(|c| c.category.as_ref())),
+    ];
+
+    for (svc, cat) in candidates {
+        match cat {
+            Some(c) if download_dir.contains(c) => {
+                info!(
+                    "category match: download_dir={:?} contains {} category {:?}",
+                    download_dir, svc, c
+                );
+                return c.clone();
             }
+            Some(c) => info!(
+                "category check: {} category {:?} not found in download_dir={:?}",
+                svc, c, download_dir
+            ),
+            None => info!("category check: {} has no category configured", svc),
         }
     }
-    if let Some(radarr) = &config.radarr {
-        if let Some(category) = &radarr.category {
-            if download_dir.contains(category) {
-                return category.clone();
-            }
-        }
-    }
-    if let Some(whisparr) = &config.whisparr {
-        if let Some(category) = &whisparr.category {
-            if download_dir.contains(category) {
-                return category.clone();
-            }
-        }
-    }
-    // Default category if none matched
+
+    warn!(
+        "category match: no configured *arr category matched download_dir={:?}, falling back to 'default'",
+        download_dir
+    );
     "default".to_string()
 }
 
@@ -46,14 +50,16 @@ pub(crate) async fn handle_torrent_add(
     app_data: &web::Data<AppData>,
 ) -> Result<Option<serde_json::Value>> {
     let arguments = payload.arguments.as_ref().unwrap().as_object().unwrap();
-    
-    // Extract download-dir from the request to determine the category
-    let download_dir = arguments.get("download-dir")
-        .and_then(|v| v.as_str())
+
+    let raw_download_dir = arguments.get("download-dir").and_then(|v| v.as_str());
+    info!(
+        "torrent-add: received download-dir={:?} (configured default: {:?})",
+        raw_download_dir, app_data.config.download_directory
+    );
+    let download_dir = raw_download_dir
         .unwrap_or(&app_data.config.download_directory)
         .to_string();
-    
-    // Determine which service sent this based on the download-dir
+
     let category = determine_category(&download_dir, &app_data.config);
     if arguments.contains_key("metainfo") {
         // .torrent files
@@ -65,14 +71,16 @@ pub(crate) async fn handle_torrent_add(
 
         match Torrent::read_from_bytes(bytes) {
             Ok(t) => {
-                // Store transfer state with the torrent hash
-                // When put.io processes this torrent, it will have the same hash
                 let hash = t.info_hash();
                 let full_download_dir = if category != "default" {
                     format!("{}/{}", app_data.config.download_directory, category)
                 } else {
                     app_data.config.download_directory.clone()
                 };
+                info!(
+                    "torrent-add: storing state for hash={} category={} dir={}",
+                    hash.to_lowercase(), category, full_download_dir
+                );
                 app_data.state.add_transfer(
                     hash.to_lowercase(),
                     category.clone(),
@@ -92,21 +100,27 @@ pub(crate) async fn handle_torrent_add(
         putio::add_transfer(api_token, magnet_url).await?;
         match Magnet::new(magnet_url) {
             Ok(m) => {
-                // Store transfer state with hash from magnet
-                if let Some(xt) = m.xt {
-                    // Extract hash from xt (usually in format "urn:btih:HASH")
-                    // unless magnet_url::Magnet has already extracted it
-                    let hash = xt.strip_prefix("urn:btih:").unwrap_or(&xt);
+                if let Some(xt) = &m.xt {
+                    let hash = xt.strip_prefix("urn:btih:").unwrap_or(xt);
                     let full_download_dir = if category != "default" {
                         format!("{}/{}", app_data.config.download_directory, category)
                     } else {
                         app_data.config.download_directory.clone()
                     };
+                    info!(
+                        "torrent-add (magnet): storing state for hash={} category={} dir={}",
+                        hash.to_lowercase(), category, full_download_dir
+                    );
                     app_data.state.add_transfer(
                         hash.to_lowercase(),
                         category.clone(),
                         full_download_dir
                     ).await?;
+                } else {
+                    warn!(
+                        "torrent-add (magnet): no xt field in magnet url, cannot store category/dir state (category={})",
+                        category
+                    );
                 }
                 if let Some(dn) = m.dn {
                     info!(

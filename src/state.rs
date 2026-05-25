@@ -1,4 +1,5 @@
 use anyhow::Result;
+use log::debug;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -24,11 +25,13 @@ impl StateManager {
     }
 
     pub async fn add_transfer(&self, hash: String, category: String, download_dir: String) -> Result<()> {
+        let key = hash.to_lowercase();
         let mut transfers = self.transfers.write().await;
+        debug!("state: add_transfer hash={} category={} dir={}", key, category, download_dir);
         transfers.insert(
-            hash.clone(),
+            key.clone(),
             TransferState {
-                hash,
+                hash: key,
                 source_category: category,
                 download_dir,
             },
@@ -38,12 +41,12 @@ impl StateManager {
 
     pub async fn get_transfer(&self, hash: &str) -> Option<TransferState> {
         let transfers = self.transfers.read().await;
-        transfers.get(hash).cloned()
+        transfers.get(&hash.to_lowercase()).cloned()
     }
 
     pub async fn remove_transfer(&self, hash: &str) -> Result<()> {
         let mut transfers = self.transfers.write().await;
-        transfers.remove(hash);
+        transfers.remove(&hash.to_lowercase());
         Ok(())
     }
 
@@ -51,6 +54,10 @@ impl StateManager {
         if let Some(state) = self.get_transfer(hash).await {
             state.download_dir
         } else {
+            debug!(
+                "state: no entry for hash={} (using default dir {})",
+                hash, default_dir
+            );
             default_dir.to_string()
         }
     }
