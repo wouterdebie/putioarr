@@ -9,7 +9,7 @@ use anyhow::Result;
 use base64::Engine;
 use colored::Colorize;
 use lava_torrent::torrent::v1::Torrent;
-use log::info;
+use log::{error, info};
 use magnet_url::Magnet;
 use serde_json::json;
 
@@ -146,21 +146,30 @@ pub(crate) async fn handle_torrent_remove(
         .as_bool()
         .unwrap();
 
-    let putio_transfers: Vec<PutIOTransfer> = putio::list_transfers(api_token)
-        .await
-        .unwrap()
-        .transfers
-        .into_iter()
-        .filter(|t| ids.contains(&t.hash.clone().unwrap_or(String::from("no_hash")).as_str()))
-        .collect();
+    let putio_transfers: Vec<PutIOTransfer> = match putio::list_transfers(api_token).await {
+        Ok(r) => r
+            .transfers
+            .into_iter()
+            .filter(|t| ids.contains(&t.hash.clone().unwrap_or(String::from("no_hash")).as_str()))
+            .collect(),
+        Err(e) => {
+            error!("Failed to list put.io transfers for removal: {}", e);
+            return None;
+        }
+    };
 
     for t in putio_transfers {
-        putio::remove_transfer(api_token, t.id).await.unwrap();
+        if let Err(e) = putio::remove_transfer(api_token, t.id).await {
+            error!("Failed to remove put.io transfer {}: {}", t.id, e);
+            continue;
+        }
 
         if t.userfile_exists && delete_local_data {
-            putio::delete_file(api_token, t.file_id.unwrap())
-                .await
-                .unwrap();
+            if let Some(file_id) = t.file_id {
+                if let Err(e) = putio::delete_file(api_token, file_id).await {
+                    error!("Failed to delete put.io file {}: {}", file_id, e);
+                }
+            }
         }
     }
 
@@ -171,7 +180,13 @@ pub(crate) async fn handle_torrent_get(
     api_token: &str,
     app_data: &web::Data<AppData>,
 ) -> Option<serde_json::Value> {
-    let transfers = putio::list_transfers(api_token).await.unwrap().transfers;
+    let transfers = match putio::list_transfers(api_token).await {
+        Ok(r) => r.transfers,
+        Err(e) => {
+            error!("Failed to list put.io transfers: {}", e);
+            Vec::new()
+        }
+    };
 
     let transmission_transfers = transfers.into_iter().map(|t| {
         let app_data = app_data.clone();

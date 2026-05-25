@@ -59,7 +59,7 @@ pub async fn list_transfers(api_token: &str) -> Result<ListTransferResponse> {
     let client = reqwest::Client::new();
     let response = client
         .get("https://api.put.io/v2/transfers/list")
-        .timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(30))
         .header("authorization", format!("Bearer {}", api_token))
         .send()
         .await?;
