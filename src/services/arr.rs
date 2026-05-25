@@ -18,6 +18,7 @@ pub struct ArrHistoryRecord {
 
 pub async fn check_imported(target: &str, api_key: &str, base_url: &str) -> Result<bool> {
     let client = reqwest::Client::new();
+    let base_url = base_url.trim_end_matches('/');
     let mut inspected = 0;
     let mut page = 0;
     loop {
