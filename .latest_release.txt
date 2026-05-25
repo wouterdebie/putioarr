@@ -1,7 +1,33 @@
-# 0.6.1
-Merge pull request #24 from jcarrag/fix_magnet_hash_extraction
+# 0.6.2
+Strip trailing slash from *arr base URL\n\nAvoid producing //api/v3/history when the configured url ends with /,
+which some *arr instances respond to with the HTML index page (200 OK)
+instead of the JSON API.
 
-Fix: stripping the prefix from the magnet hash when not present
-Fix: magnet_url::Magnet already strips the prefix from the magnet hash
+Support arbitrarily-named *arr instances under [arrs.<name>]
 
-Update impl so that it can handle both the prefix existing and not
+[sonarr]/[radarr]/[whisparr] continue to work as named single instances.
+Additional instances can now be declared as [arrs.foo], [arrs.bar], etc.,
+all using the same v3 history API for import checks. Config.all_arrs()
+yields a unified list; handle_torrent_add and is_imported iterate over it
+so categories and import-check work across every configured instance.
+
+Suppress noisy HTTP/runtime crate logs at debug level
+
+Pin actix, reqwest, hyper, rustls, mio, h2, tokio_util and related crates
+  to info level so user-set debug only affects putioarr's own logs.
+
+Improve category/state diagnostics and normalize hash lookups
+
+- Normalize transfer hash to lowercase in all StateManager operations
+  so reads (using put.io's hash casing) match writes (lowercased on add).
+- Log every category determination in handle_torrent_add: incoming
+  download-dir, per-*arr match checks, and the resulting stored state.
+- Stop poisoning state with a synthetic 'default' entry for unknown
+  hashes in produce_transfers; just warn and fall back dynamically.
+
+Handle put.io API errors gracefully in transmission handlers
+
+- Replace .unwrap() calls in handle_torrent_remove and handle_torrent_get
+  with proper error logging to prevent actix arbiter panics on request
+  timeouts.
+- Increase list_transfers timeout from 10s to 30s.
