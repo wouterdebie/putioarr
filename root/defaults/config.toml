@@ -51,9 +51,16 @@ api_key = ""
 # Can be found in Radarr: Settings -> General
 # api_key = "MYWHISPARRAPIKEY"
 
+# [lidarr]
+# url = "http://mylidarrhost:8686/lidarr"
+# Can be found in Lidarr: Settings -> General
+# api_key = "MYLIDARRAPIKEY"
+
 # Additional *arr instances can be added under [arrs.<name>] with any name.
-# They behave identically to [sonarr]/[radarr]/[whisparr] (same v3 API).
+# Set `type` to one of sonarr/radarr/whisparr/lidarr (defaults to inferring
+# from the section name).
 # [arrs.whisparrv2]
+# type = "whisparr"
 # url = "http://whis.lan:6969/whisparr"
 # api_key = "MYWHISPARRV2APIKEY"
 # category = "whistwo"

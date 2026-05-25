@@ -68,15 +68,25 @@ api_key = "MYWHISPARRAPIKEY"
 # This should match the category configured in Whisparr's download client settings
 category = "adult"
 
+[lidarr]
+url = "http://mylidarrhost:8686/lidarr"
+# Can be found in Settings -> General
+api_key = "MYLIDARRAPIKEY"
+# Optional category/subdirectory for Lidarr downloads (e.g., "music")
+category = "music"
+
 # Additional *arr instances can be added under [arrs.<name>] with any name.
-# They behave identically to [sonarr]/[radarr]/[whisparr] (same v3 API).
-# Useful for running multiple Sonarr/Radarr/Whisparr instances side by side.
+# They behave identically to [sonarr]/[radarr]/[whisparr]/[lidarr]; use
+# `type` to pick the flavor (defaults to inferring from the section name).
+# Useful for running multiple Sonarr/Radarr/Whisparr/Lidarr instances side by side.
 # [arrs.whisparrv2]
+# type = "whisparr"
 # url = "http://whis.lan:6969/whisparr"
 # api_key = "MYWHISPARRV2APIKEY"
 # category = "whistwo"
 #
 # [arrs.whisparrv3]
+# type = "whisparr"
 # url = "http://docker.lan:6969/whisparr/"
 # api_key = "MYWHISPARRV3APIKEY"
 # category = "whisthree"

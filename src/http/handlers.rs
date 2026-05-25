@@ -19,7 +19,7 @@ fn determine_category(download_dir: &str, config: &Config) -> String {
         warn!("category check: no *arr instances configured");
     }
 
-    for (name, arr) in &arrs {
+    for (name, _kind, arr) in &arrs {
         match &arr.category {
             Some(c) if download_dir.contains(c) => {
                 info!(

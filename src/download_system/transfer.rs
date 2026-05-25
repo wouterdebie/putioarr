@@ -1,6 +1,6 @@
 use crate::{
     services::{
-        arr,
+        arr::ArrApp,
         putio::{self, PutIOTransfer},
     },
     AppData,
@@ -10,7 +10,7 @@ use anyhow::Result;
 use async_channel::Sender;
 use async_recursion::async_recursion;
 use colored::*;
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::{fmt::Display, path::Path};
 use tokio::time::sleep;
@@ -28,29 +28,33 @@ pub struct Transfer {
 impl Transfer {
     pub async fn is_imported(&self) -> bool {
         let targets = self.targets.as_ref().unwrap().clone();
-        let check_services: Vec<(String, String, String)> = self
+        let apps: Vec<ArrApp> = self
             .app_data
             .config
             .all_arrs()
             .into_iter()
-            .map(|(name, c)| (name, c.url.clone(), c.api_key.clone()))
+            .map(|(name, kind, c)| ArrApp::new(name, kind, c))
             .collect();
 
         let targets = targets
             .into_iter()
             .filter(|t| t.target_type == TargetType::File)
             .collect::<Vec<DownloadTarget>>();
-        // .map(|t| t.to.clone())
-        // .collect::<Vec<String>>();
 
         let mut results = Vec::<bool>::new();
         for target in targets {
             let mut service_results = vec![];
-            for (service_name, url, key) in &check_services {
-                let service_result = match arr::check_imported(&target.to, key, url).await {
+            for app in &apps {
+                // Only ask an *arr about files matching its media type.
+                if let Some(mt) = &target.media_type {
+                    if *mt != app.kind.media_type() {
+                        continue;
+                    }
+                }
+                let service_result = match app.check_imported(&target.to).await {
                     Ok(r) => r,
                     Err(e) => {
-                        error!("Error retrieving history from {}: {}", service_name, e);
+                        error!("Error retrieving history from {}: {}", app, e);
                         false
                     }
                 };
@@ -58,13 +62,15 @@ impl Transfer {
                     info!(
                         "{}: found imported by {}",
                         &target,
-                        service_name.bright_blue()
+                        app.to_string().bright_blue()
                     );
                 }
                 service_results.push(service_result)
             }
-            // Check if ANY of the service_results are true and put the outcome in results
-            results.push(service_results.into_iter().any(|x| x));
+            // If no service was eligible for this target, treat it as imported
+            // (otherwise an audio file with no Lidarr would block forever).
+            let any_imported = service_results.is_empty() || service_results.into_iter().any(|x| x);
+            results.push(any_imported);
         }
         // Check if all targets have been imported
         results.into_iter().all(|x| x)
@@ -146,6 +152,7 @@ async fn recurse_download_targets(
                     to,
                     top_level,
                     transfer_hash: hash.to_string(),
+                    media_type: None,
                 });
 
                 for file in response.files {
@@ -162,7 +169,7 @@ async fn recurse_download_targets(
                 }
             }
         }
-        "VIDEO" => {
+        "VIDEO" | "AUDIO" => {
             // Get download URL for file
             let url = putio::url(&app_data.config.putio.api_key, response.parent.id).await?;
             targets.push(DownloadTarget {
@@ -171,9 +178,15 @@ async fn recurse_download_targets(
                 to,
                 top_level,
                 transfer_hash: hash.to_string(),
+                media_type: MediaType::from_putio(response.parent.file_type.as_str()),
             });
         }
-        _ => {}
+        other => {
+            debug!(
+                "{}: skipping file type {}",
+                response.parent.name, other
+            );
+        }
     }
 
     Ok(targets)
@@ -186,6 +199,22 @@ pub enum TransferMessage {
     Imported(Transfer),
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq, Copy)]
+pub enum MediaType {
+    Audio,
+    Video,
+}
+
+impl MediaType {
+    pub fn from_putio(file_type: &str) -> Option<Self> {
+        match file_type {
+            "AUDIO" => Some(Self::Audio),
+            "VIDEO" => Some(Self::Video),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DownloadTarget {
     pub from: Option<String>,
@@ -193,6 +222,7 @@ pub struct DownloadTarget {
     pub target_type: TargetType,
     pub top_level: bool,
     pub transfer_hash: String,
+    pub media_type: Option<MediaType>,
 }
 
 impl Display for DownloadTarget {

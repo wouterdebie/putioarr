@@ -60,31 +60,40 @@ pub struct Config {
     sonarr: Option<ArrConfig>,
     radarr: Option<ArrConfig>,
     whisparr: Option<ArrConfig>,
+    lidarr: Option<ArrConfig>,
     /// Arbitrarily-named *arr instances, configured under `[arrs.<name>]`
-    /// in config.toml. All entries are treated the same as `[sonarr]`,
-    /// `[radarr]`, `[whisparr]` — the Sonarr/Radarr/Whisparr v3 history
-    /// API is identical, so the section name is just a label.
+    /// in config.toml. Each entry must set `type = "sonarr"|"radarr"|"whisparr"|"lidarr"`
+    /// so we know which API flavor and media type to use.
     #[serde(default)]
     arrs: HashMap<String, ArrConfig>,
 }
 
 impl Config {
-    /// Iterate over every configured *arr instance as `(name, &ArrConfig)`.
-    /// Combines the named `[sonarr]`, `[radarr]`, `[whisparr]` sections with
-    /// anything under `[arrs.*]`.
-    pub fn all_arrs(&self) -> Vec<(String, &ArrConfig)> {
-        let mut out: Vec<(String, &ArrConfig)> = Vec::new();
+    /// Iterate over every configured *arr instance as `(name, kind, &ArrConfig)`.
+    /// Combines the named `[sonarr]`, `[radarr]`, `[whisparr]`, `[lidarr]`
+    /// sections with anything under `[arrs.*]`.
+    pub fn all_arrs(&self) -> Vec<(String, services::arr::ArrKind, &ArrConfig)> {
+        let mut out: Vec<(String, services::arr::ArrKind, &ArrConfig)> = Vec::new();
         if let Some(c) = &self.sonarr {
-            out.push(("sonarr".to_string(), c));
+            out.push(("sonarr".to_string(), services::arr::ArrKind::Sonarr, c));
         }
         if let Some(c) = &self.radarr {
-            out.push(("radarr".to_string(), c));
+            out.push(("radarr".to_string(), services::arr::ArrKind::Radarr, c));
         }
         if let Some(c) = &self.whisparr {
-            out.push(("whisparr".to_string(), c));
+            out.push(("whisparr".to_string(), services::arr::ArrKind::Whisparr, c));
+        }
+        if let Some(c) = &self.lidarr {
+            out.push(("lidarr".to_string(), services::arr::ArrKind::Lidarr, c));
         }
         for (name, c) in &self.arrs {
-            out.push((name.clone(), c));
+            let kind = c
+                .r#type
+                .as_deref()
+                .and_then(services::arr::ArrKind::from_str)
+                .or_else(|| services::arr::ArrKind::from_str(name))
+                .unwrap_or(services::arr::ArrKind::Sonarr);
+            out.push((name.clone(), kind, c));
         }
         out
     }
@@ -97,9 +106,14 @@ pub struct PutioConfig {
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ArrConfig {
-    url: String,
-    api_key: String,
-    category: Option<String>,
+    pub url: String,
+    pub api_key: String,
+    pub category: Option<String>,
+    /// For [arrs.<name>] entries: explicitly choose the *arr flavor.
+    /// One of "sonarr", "radarr", "whisparr", "lidarr". Defaults to inferring
+    /// from the section name, or Sonarr if that fails.
+    #[serde(default, rename = "type")]
+    pub r#type: Option<String>,
 }
 
 pub struct AppData {
