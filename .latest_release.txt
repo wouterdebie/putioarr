@@ -1,16 +1,10 @@
-# 0.6.3
-Add Lidarr support and media-type aware import checks
+# 0.6.4
+ci: build amd64/arm64 natively in parallel
 
-Lidarr can now be configured via a top-level [lidarr] section or as a typed
-entry under [arrs.<name>] (type = lidarr). Each *arr instance is now
- tagged with a kind (sonarr/radarr/whisparr/lidarr); Lidarr hits the v1
- history endpoint and looks for trackFileImported, the others continue to
- use v3 / downloadFolderImported.
-
-DownloadTarget now carries an optional MediaType (Audio/Video) derived
-from put.io's file_type. is_imported only queries *arrs whose media type
-matches the target, so audio files are routed to Lidarr and video files
-to Sonarr/Radarr/Whisparr. AUDIO files are now picked up as download
-targets in addition to VIDEO. Other file types are logged at debug level.
-
-Adapted from #18 by @gbagnoli.
+Previously the workflow used qemu to build the arm64 image on the amd64
+runner, which made each release take ~50min. Split into a matrix that
+builds each arch on a native runner (ubuntu-latest for amd64,
+ubuntu-24.04-arm for arm64), pushes each image by digest, then merges
+them into a multi-arch manifest in a final job. Adds a per-platform GHA
+buildx cache so subsequent runs with unchanged deps skip the cold cargo
+build. Drops Swatinem/rust-cache (no effect inside Docker).
