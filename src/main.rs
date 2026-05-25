@@ -113,12 +113,19 @@ async fn main() -> Result<()> {
                 None
             };
 
+            // User-provided level applies to our crate; noisy HTTP/runtime
+            // crates are pinned to `info` so debug logs stay readable.
+            let log_filter = format!(
+                "{level},actix_web=info,actix_server=info,actix_http=info,mio=info,reqwest=info,hyper=info,hyper_util=info,h2=info,rustls=info,want=info,tokio_util=info",
+                level = config.loglevel
+            );
+
             env_logger::Builder::new()
                 .default_format()
                 .format_module_path(false)
                 .format_target(false)
                 .format_timestamp(log_timestamp)
-                .parse_filters(config.loglevel.as_str())
+                .parse_filters(&log_filter)
                 .init();
 
             info!("Starting putioarr, version {}", VERSION);
