@@ -68,6 +68,19 @@ api_key = "MYWHISPARRAPIKEY"
 # This should match the category configured in Whisparr's download client settings
 category = "adult"
 
+# Additional *arr instances can be added under [arrs.<name>] with any name.
+# They behave identically to [sonarr]/[radarr]/[whisparr] (same v3 API).
+# Useful for running multiple Sonarr/Radarr/Whisparr instances side by side.
+# [arrs.whisparrv2]
+# url = "http://whis.lan:6969/whisparr"
+# api_key = "MYWHISPARRV2APIKEY"
+# category = "whistwo"
+#
+# [arrs.whisparrv3]
+# url = "http://docker.lan:6969/whisparr/"
+# api_key = "MYWHISPARRV3APIKEY"
+# category = "whisthree"
+
 "#;
 
 #[derive(Serialize)]

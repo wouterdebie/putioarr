@@ -50,3 +50,25 @@ api_key = ""
 # url = "http://mywhisparrhost:6969/radarr"
 # Can be found in Radarr: Settings -> General
 # api_key = "MYWHISPARRAPIKEY"
+
+# Additional *arr instances can be added under [arrs.<name>] with any name.
+# They behave identically to [sonarr]/[radarr]/[whisparr] (same v3 API).
+# [arrs.whisparrv2]
+# url = "http://whis.lan:6969/whisparr"
+# api_key = "MYWHISPARRV2APIKEY"
+# category = "whistwo"
+
+
+# Additional, arbitrarily-named *arr instances can be defined under [arrs.<name>].
+# The name is arbitrary; the section is treated the same as the legacy
+# [sonarr]/[radarr]/[whisparr] sections. Useful when you run more than one
+# instance of the same *arr (e.g. multiple Whisparr versions).
+# [arrs.whisparrv2]
+# url = "http://whisparr-v2:6969/whisparr"
+# api_key = "MYWHISPARRV2APIKEY"
+# category = "whistwo"
+#
+# [arrs.whisparrv3]
+# url = "http://whisparr-v3:6969/whisparr"
+# api_key = "MYWHISPARRV3APIKEY"
+# category = "whisthree"

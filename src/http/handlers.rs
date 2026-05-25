@@ -14,26 +14,25 @@ use magnet_url::Magnet;
 use serde_json::json;
 
 fn determine_category(download_dir: &str, config: &Config) -> String {
-    let candidates = [
-        ("sonarr", config.sonarr.as_ref().and_then(|c| c.category.as_ref())),
-        ("radarr", config.radarr.as_ref().and_then(|c| c.category.as_ref())),
-        ("whisparr", config.whisparr.as_ref().and_then(|c| c.category.as_ref())),
-    ];
+    let arrs = config.all_arrs();
+    if arrs.is_empty() {
+        warn!("category check: no *arr instances configured");
+    }
 
-    for (svc, cat) in candidates {
-        match cat {
+    for (name, arr) in &arrs {
+        match &arr.category {
             Some(c) if download_dir.contains(c) => {
                 info!(
                     "category match: download_dir={:?} contains {} category {:?}",
-                    download_dir, svc, c
+                    download_dir, name, c
                 );
                 return c.clone();
             }
             Some(c) => info!(
                 "category check: {} category {:?} not found in download_dir={:?}",
-                svc, c, download_dir
+                name, c, download_dir
             ),
-            None => info!("category check: {} has no category configured", svc),
+            None => info!("category check: {} has no category configured", name),
         }
     }
 

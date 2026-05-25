@@ -28,16 +28,13 @@ pub struct Transfer {
 impl Transfer {
     pub async fn is_imported(&self) -> bool {
         let targets = self.targets.as_ref().unwrap().clone();
-        let mut check_services = Vec::<(&str, String, String)>::new();
-        if let Some(a) = &self.app_data.config.sonarr {
-            check_services.push(("Sonarr", a.url.clone(), a.api_key.clone()))
-        }
-        if let Some(a) = &self.app_data.config.radarr {
-            check_services.push(("Radarr", a.url.clone(), a.api_key.clone()))
-        }
-        if let Some(a) = &self.app_data.config.whisparr {
-            check_services.push(("Whisparr", a.url.clone(), a.api_key.clone()))
-        }
+        let check_services: Vec<(String, String, String)> = self
+            .app_data
+            .config
+            .all_arrs()
+            .into_iter()
+            .map(|(name, c)| (name, c.url.clone(), c.api_key.clone()))
+            .collect();
 
         let targets = targets
             .into_iter()

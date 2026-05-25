@@ -10,6 +10,7 @@ use figment::{
 };
 use log::{error, info};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use utils::{generate_config, get_token};
 
 mod download_system;
@@ -59,6 +60,34 @@ pub struct Config {
     sonarr: Option<ArrConfig>,
     radarr: Option<ArrConfig>,
     whisparr: Option<ArrConfig>,
+    /// Arbitrarily-named *arr instances, configured under `[arrs.<name>]`
+    /// in config.toml. All entries are treated the same as `[sonarr]`,
+    /// `[radarr]`, `[whisparr]` — the Sonarr/Radarr/Whisparr v3 history
+    /// API is identical, so the section name is just a label.
+    #[serde(default)]
+    arrs: HashMap<String, ArrConfig>,
+}
+
+impl Config {
+    /// Iterate over every configured *arr instance as `(name, &ArrConfig)`.
+    /// Combines the named `[sonarr]`, `[radarr]`, `[whisparr]` sections with
+    /// anything under `[arrs.*]`.
+    pub fn all_arrs(&self) -> Vec<(String, &ArrConfig)> {
+        let mut out: Vec<(String, &ArrConfig)> = Vec::new();
+        if let Some(c) = &self.sonarr {
+            out.push(("sonarr".to_string(), c));
+        }
+        if let Some(c) = &self.radarr {
+            out.push(("radarr".to_string(), c));
+        }
+        if let Some(c) = &self.whisparr {
+            out.push(("whisparr".to_string(), c));
+        }
+        for (name, c) in &self.arrs {
+            out.push((name.clone(), c));
+        }
+        out
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
