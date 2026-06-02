@@ -175,7 +175,7 @@ async fn main() -> Result<()> {
 
             let app_data = web::Data::new(AppData {
                 config: config.clone(),
-                state: state::StateManager::new(),
+                state: state::StateManager::new(config.putio.api_key.clone()),
             });
 
             match putio::account_info(&app_data.config.putio.api_key).await {
@@ -185,6 +185,11 @@ async fn main() -> Result<()> {
                     bail!(e)
                 }
             }
+
+            // Restore transfer state (category/download-dir mappings) that was
+            // persisted to put.io's per-user config store, so restarts keep
+            // routing transfers to the correct directories.
+            app_data.state.load().await?;
 
             let data_for_download_system = app_data.clone();
             download_system::start(data_for_download_system)

@@ -1,6 +1,6 @@
 use anyhow::{bail, Result};
 use reqwest::multipart;
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{collections::HashMap, time::Duration};
 
 #[derive(Debug, Clone, Deserialize)]
@@ -268,4 +268,60 @@ pub async fn check_oob(oob_code: String) -> Result<String> {
     Ok(j.get("oauth_token")
         .expect("deserializing OAuth token")
         .to_string())
+}
+
+/// Fetches a value from put.io's per-user, per-app key-value config store.
+///
+/// Returns `Ok(None)` if the key has not been set. This store is owned by
+/// put.io and persists across restarts, which makes it a good place to keep
+/// putioarr's transfer state.
+pub async fn get_config_value<T: DeserializeOwned>(
+    api_token: &str,
+    key: &str,
+) -> Result<Option<T>> {
+    #[derive(Deserialize)]
+    struct ConfigValueResponse<T> {
+        value: Option<T>,
+    }
+
+    let client = reqwest::Client::new();
+    let response = client
+        .get(format!("https://api.put.io/v2/config/{}", key))
+        .timeout(Duration::from_secs(10))
+        .header("authorization", format!("Bearer {}", api_token))
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        bail!(
+            "Error getting put.io config key {}: {}",
+            key,
+            response.status()
+        );
+    }
+
+    Ok(response.json::<ConfigValueResponse<T>>().await?.value)
+}
+
+/// Stores a value in put.io's per-user, per-app key-value config store.
+pub async fn set_config_value<T: Serialize>(api_token: &str, key: &str, value: &T) -> Result<()> {
+    let client = reqwest::Client::new();
+    let body = serde_json::json!({ "value": value });
+    let response = client
+        .put(format!("https://api.put.io/v2/config/{}", key))
+        .timeout(Duration::from_secs(10))
+        .header("authorization", format!("Bearer {}", api_token))
+        .json(&body)
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        bail!(
+            "Error setting put.io config key {}: {}",
+            key,
+            response.status()
+        );
+    }
+
+    Ok(())
 }

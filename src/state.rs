@@ -1,9 +1,14 @@
+use crate::services::putio;
 use anyhow::Result;
-use log::debug;
+use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+
+/// Key under which putioarr stores its transfer state in put.io's per-user
+/// key-value config store.
+const CONFIG_KEY: &str = "putioarr_transfers";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransferState {
@@ -12,30 +17,73 @@ pub struct TransferState {
     pub download_dir: String,
 }
 
+/// Tracks the category/download-dir chosen for each transfer.
+///
+/// Reads are served from an in-memory cache for speed, while mutations are
+/// written through to put.io's per-user key-value config store so the mapping
+/// survives putioarr restarts.
 #[derive(Clone)]
 pub struct StateManager {
+    api_token: String,
     transfers: Arc<RwLock<HashMap<String, TransferState>>>,
 }
 
 impl StateManager {
-    pub fn new() -> Self {
+    pub fn new(api_token: String) -> Self {
         Self {
+            api_token,
             transfers: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
-    pub async fn add_transfer(&self, hash: String, category: String, download_dir: String) -> Result<()> {
+    /// Loads persisted state from put.io into the in-memory cache. Should be
+    /// called once at startup, before any transfers are processed.
+    pub async fn load(&self) -> Result<()> {
+        match putio::get_config_value::<HashMap<String, TransferState>>(&self.api_token, CONFIG_KEY)
+            .await
+        {
+            Ok(Some(map)) => {
+                let count = map.len();
+                *self.transfers.write().await = map;
+                info!("state: loaded {} transfer(s) from put.io config", count);
+            }
+            Ok(None) => debug!("state: no persisted state found in put.io config"),
+            Err(e) => warn!("state: failed to load persisted state from put.io: {}", e),
+        }
+        Ok(())
+    }
+
+    /// Persists the current in-memory cache to put.io's config store.
+    async fn persist(&self) {
+        let map = self.transfers.read().await.clone();
+        if let Err(e) = putio::set_config_value(&self.api_token, CONFIG_KEY, &map).await {
+            error!("state: failed to persist state to put.io: {}", e);
+        }
+    }
+
+    pub async fn add_transfer(
+        &self,
+        hash: String,
+        category: String,
+        download_dir: String,
+    ) -> Result<()> {
         let key = hash.to_lowercase();
-        let mut transfers = self.transfers.write().await;
-        debug!("state: add_transfer hash={} category={} dir={}", key, category, download_dir);
-        transfers.insert(
-            key.clone(),
-            TransferState {
-                hash: key,
-                source_category: category,
-                download_dir,
-            },
+        debug!(
+            "state: add_transfer hash={} category={} dir={}",
+            key, category, download_dir
         );
+        {
+            let mut transfers = self.transfers.write().await;
+            transfers.insert(
+                key.clone(),
+                TransferState {
+                    hash: key,
+                    source_category: category,
+                    download_dir,
+                },
+            );
+        }
+        self.persist().await;
         Ok(())
     }
 
@@ -45,8 +93,11 @@ impl StateManager {
     }
 
     pub async fn remove_transfer(&self, hash: &str) -> Result<()> {
-        let mut transfers = self.transfers.write().await;
-        transfers.remove(&hash.to_lowercase());
+        {
+            let mut transfers = self.transfers.write().await;
+            transfers.remove(&hash.to_lowercase());
+        }
+        self.persist().await;
         Ok(())
     }
 
