@@ -1,10 +1,7 @@
-# 0.6.4
-ci: build amd64/arm64 natively in parallel
+# 0.6.5
+Persist transfer state in put.io key-value config store
 
-Previously the workflow used qemu to build the arm64 image on the amd64
-runner, which made each release take ~50min. Split into a matrix that
-builds each arch on a native runner (ubuntu-latest for amd64,
-ubuntu-24.04-arm for arm64), pushes each image by digest, then merges
-them into a multi-arch manifest in a final job. Adds a per-platform GHA
-buildx cache so subsequent runs with unchanged deps skip the cold cargo
-build. Drops Swatinem/rust-cache (no effect inside Docker).
+Back StateManager with put.io's per-user /v2/config key-value store instead
+of a volatile in-memory HashMap. State is loaded on startup and written
+through on each mutation, so category/download-dir mappings survive restarts
+and transfers route to the correct directory.
