@@ -56,8 +56,9 @@ impl Transfer {
                     Err(e) => {
                         // A misconfigured/unreachable *arr fails for every
                         // transfer on every poll; throttle the log so it doesn't
-                        // fill the disk over time (issue #21).
-                        if self.app_data.state.should_log_arr_error(&app.to_string()).await {
+                        // fill the disk over time (issue #21). Key on the app's
+                        // existing name (no allocation on the suppressed path).
+                        if self.app_data.state.should_log_arr_error(&app.name).await {
                             error!(
                                 "Error retrieving history from {} (suppressing repeats for 5m): {}",
                                 app, e
