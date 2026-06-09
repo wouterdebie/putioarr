@@ -48,7 +48,7 @@ impl StateManager {
     }
 
     /// Minimum time between logging the same *arr's connection error.
-    const ARR_ERROR_LOG_INTERVAL: Duration = Duration::from_secs(300);
+    pub const ARR_ERROR_LOG_INTERVAL: Duration = Duration::from_secs(300);
 
     /// Returns true if an error for `app` should be logged now, throttling
     /// repeats to at most one per [`Self::ARR_ERROR_LOG_INTERVAL`]. Keeps a

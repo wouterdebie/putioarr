@@ -60,8 +60,10 @@ impl Transfer {
                         // existing name (no allocation on the suppressed path).
                         if self.app_data.state.should_log_arr_error(&app.name).await {
                             error!(
-                                "Error retrieving history from {} (suppressing repeats for 5m): {}",
-                                app, e
+                                "Error retrieving history from {} (suppressing repeats for {:?}): {}",
+                                app,
+                                crate::state::StateManager::ARR_ERROR_LOG_INTERVAL,
+                                e
                             );
                         }
                         false
