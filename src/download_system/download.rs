@@ -75,6 +75,14 @@ async fn download_target(app_data: &Data<AppData>, target: &DownloadTarget) -> R
 async fn fetch(target: &DownloadTarget, uid: u32, client: &reqwest::Client) -> Result<()> {
     let tmp_path = format!("{}.downloading", &target.to);
 
+    // Make sure the destination directory exists. A File target can be processed
+    // before its parent Directory target, and external cleanup may have removed
+    // an emptied folder, so create it here rather than failing with "No such
+    // file or directory" (which the retry loop below would otherwise spin on).
+    if let Some(parent) = Path::new(&tmp_path).parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+
     // A single stream can stall (put.io stops sending mid-download). Rather than
     // restarting the whole file, retry and resume from the bytes already on disk
     // using a Range request. put.io serves `206 Partial Content`, so each retry
