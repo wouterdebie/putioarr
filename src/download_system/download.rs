@@ -6,7 +6,7 @@ use async_channel::{Receiver, Sender};
 use colored::*;
 use file_owner::PathExt;
 use futures::StreamExt;
-use log::{error, info};
+use log::{error, info, warn};
 use nix::unistd::Uid;
 use std::{fs, path::Path};
 
@@ -74,36 +74,78 @@ async fn download_target(app_data: &Data<AppData>, target: &DownloadTarget) -> R
 
 async fn fetch(target: &DownloadTarget, uid: u32, client: &reqwest::Client) -> Result<()> {
     let tmp_path = format!("{}.downloading", &target.to);
-    let mut tmp_file = tokio::fs::File::create(&tmp_path).await?;
 
-    let url = target.from.clone().context("No URL found")?;
-
-    // Reuse the shared client (built with a connect timeout) so connections
-    // are pooled across downloads instead of building one per fetch.
-    let response = client.get(url).send().await?;
-    if !response.status().is_success() {
-        bail!("download failed: HTTP {}", response.status());
-    }
-    let mut byte_stream = response.bytes_stream();
-
-    // Guard each chunk read with a timeout. If put.io stops sending data
-    // mid-stream, the download fails instead of hanging the worker forever
-    // (which would eventually stall every download worker — see issue #9).
+    // A single stream can stall (put.io stops sending mid-download). Rather than
+    // restarting the whole file, retry and resume from the bytes already on disk
+    // using a Range request. put.io serves `206 Partial Content`, so each retry
+    // picks up where the previous one stopped until the file is complete.
+    const MAX_ATTEMPTS: u32 = 20;
+    let mut attempt = 0;
     loop {
-        match tokio::time::timeout(std::time::Duration::from_secs(60), byte_stream.next()).await {
-            Ok(Some(item)) => {
-                tokio::io::copy(&mut item?.as_ref(), &mut tmp_file).await?;
+        attempt += 1;
+        match fetch_attempt(target, &tmp_path, client).await {
+            Ok(()) => break,
+            Err(e) if attempt < MAX_ATTEMPTS => {
+                warn!("{}: download attempt {} failed ({}), resuming", target, attempt, e);
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
             }
-            Ok(None) => break,
-            Err(_) => bail!("download stalled: no data received for 60s"),
+            Err(e) => bail!("download failed after {} attempts: {}", attempt, e),
         }
     }
+
     if Uid::effective().is_root() {
         tmp_path.clone().set_owner(uid)?;
     }
 
     fs::rename(&tmp_path, &target.to)?;
 
+    Ok(())
+}
+
+/// Downloads `target` into `tmp_path`, resuming from whatever is already on disk
+/// via a Range request. Returns Ok only when the stream finished cleanly; a
+/// stall (no data for 60s) or a non-success status returns an error so the
+/// caller can retry and resume.
+async fn fetch_attempt(
+    target: &DownloadTarget,
+    tmp_path: &str,
+    client: &reqwest::Client,
+) -> Result<()> {
+    let existing = tokio::fs::metadata(tmp_path)
+        .await
+        .map(|m| m.len())
+        .unwrap_or(0);
+
+    let url = target.from.clone().context("No URL found")?;
+    let mut req = client.get(url);
+    if existing > 0 {
+        req = req.header(reqwest::header::RANGE, format!("bytes={}-", existing));
+    }
+    let response = req.send().await?;
+    let status = response.status();
+    if !(status.is_success() || status == reqwest::StatusCode::PARTIAL_CONTENT) {
+        bail!("HTTP {}", status);
+    }
+
+    // If the server honored the Range request (206), append to the partial file;
+    // otherwise it returned the whole file (200), so start it over.
+    let resumed = status == reqwest::StatusCode::PARTIAL_CONTENT && existing > 0;
+    let mut tmp_file = if resumed {
+        tokio::fs::OpenOptions::new().append(true).open(tmp_path).await?
+    } else {
+        tokio::fs::File::create(tmp_path).await?
+    };
+
+    let mut byte_stream = response.bytes_stream();
+    loop {
+        match tokio::time::timeout(std::time::Duration::from_secs(60), byte_stream.next()).await {
+            Ok(Some(item)) => {
+                tokio::io::copy(&mut item?.as_ref(), &mut tmp_file).await?;
+            }
+            Ok(None) => break,
+            Err(_) => bail!("stalled: no data received for 60s"),
+        }
+    }
     Ok(())
 }
 
