@@ -56,6 +56,13 @@ pub struct Config {
     skip_directories: Vec<String>,
     uid: u32,
     username: String,
+    /// When true, download every transfer found on the put.io account, including
+    /// ones not added by putioarr (e.g. a manually-maintained Watch List). When
+    /// false (default), only download transfers putioarr added on behalf of an
+    /// *arr. Keeping this false avoids hanging on seeding transfers (issue #9) and
+    /// lets the put.io account be shared with manual downloads.
+    #[serde(default)]
+    download_unmanaged: bool,
     putio: PutioConfig,
     sonarr: Option<ArrConfig>,
     radarr: Option<ArrConfig>,
@@ -119,6 +126,9 @@ pub struct ArrConfig {
 pub struct AppData {
     pub config: Config,
     pub state: state::StateManager,
+    /// Shared HTTP client, reused across all downloads so connections are
+    /// pooled instead of building a new client per fetch.
+    pub http: reqwest::Client,
 }
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -137,6 +147,7 @@ async fn main() -> Result<()> {
                 .join(Serialized::default("polling_interval", 10))
                 .join(Serialized::default("port", 9091))
                 .join(Serialized::default("uid", 1000))
+                .join(Serialized::default("download_unmanaged", false))
                 .join(Serialized::default(
                     "skip_directories",
                     vec!["sample", "extras"],
@@ -173,9 +184,14 @@ async fn main() -> Result<()> {
 
             info!("Starting putioarr, version {}", VERSION);
 
+            let http = reqwest::Client::builder()
+                .connect_timeout(std::time::Duration::from_secs(30))
+                .build()
+                .expect("building shared reqwest client");
             let app_data = web::Data::new(AppData {
                 config: config.clone(),
                 state: state::StateManager::new(config.putio.api_key.clone()),
+                http,
             });
 
             match putio::account_info(&app_data.config.putio.api_key).await {

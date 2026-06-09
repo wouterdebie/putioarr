@@ -79,6 +79,9 @@ impl Worker {
                         DownloadDoneStatus::Failed => false,
                     }) {
                         info!("{}: download {}", t, "done".blue());
+                        // The files now exist locally, so it's safe to report
+                        // this transfer as complete to the *arr (see issue #16).
+                        self.app_data.state.mark_local_complete(t.transfer_id).await;
                         self.tx
                             .send(TransferMessage::Downloaded(Transfer {
                                 targets: Some(targets),

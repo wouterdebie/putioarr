@@ -1,7 +1,7 @@
 use crate::{
     // downloader::DownloadStatus,
     services::putio::{self, PutIOTransfer},
-    services::transmission::{TransmissionRequest, TransmissionTorrent},
+    services::transmission::{TransmissionRequest, TransmissionTorrent, TransmissionTorrentStatus},
     AppData, Config,
 };
 use actix_web::web;
@@ -208,11 +208,27 @@ pub(crate) async fn handle_torrent_get(
             // Get the correct download directory from state if available
             if let Some(hash) = &t.hash {
                 tt.download_dir = app_data.state.get_download_dir_for_transfer(
-                    hash, 
+                    hash,
                     &app_data.config.download_directory
                 ).await;
             } else {
                 tt.download_dir = app_data.config.download_directory.clone();
+            }
+            // put.io marks a transfer complete as soon as *its own* (cloud)
+            // download finishes, but the files don't exist on local disk until
+            // putioarr has pulled them down. Reporting completion to the *arr
+            // too early makes it try to import missing files ("No files found
+            // eligible for import"). Keep the torrent in a downloading state
+            // until putioarr has actually finished the local download (#16).
+            let putio_done = tt.is_finished
+                || matches!(
+                    tt.status,
+                    TransmissionTorrentStatus::Seeding | TransmissionTorrentStatus::Stopped
+                );
+            if putio_done && !app_data.state.is_local_complete(t.id).await {
+                tt.is_finished = false;
+                tt.left_until_done = std::cmp::max(tt.total_size, 1);
+                tt.status = TransmissionTorrentStatus::Downloading;
             }
             tt
         }

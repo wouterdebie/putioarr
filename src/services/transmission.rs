@@ -107,7 +107,7 @@ impl From<PutIOTransfer> for TransmissionTorrent {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone, Copy, PartialEq)]
 pub enum TransmissionTorrentStatus {
     Stopped = 0,
     CheckWait = 1,
