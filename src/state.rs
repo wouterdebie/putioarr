@@ -30,6 +30,12 @@ pub struct StateManager {
     /// disk. Used to avoid telling the *arr a download is complete before the
     /// files actually exist locally (see issue #16).
     local_complete: Arc<RwLock<HashSet<u64>>>,
+    /// Caches the actual put.io file/folder name for a transfer's `file_id`.
+    /// put.io's transfer name often differs from the downloaded file/folder name
+    /// (e.g. an indexer prefix), and we report the latter to the *arr so it can
+    /// locate the download (see issue #20). A file_id's name never changes once
+    /// downloaded, so caching it avoids an API call on every torrent-get.
+    file_names: Arc<RwLock<HashMap<i64, String>>>,
 }
 
 impl StateManager {
@@ -38,7 +44,18 @@ impl StateManager {
             api_token,
             transfers: Arc::new(RwLock::new(HashMap::new())),
             local_complete: Arc::new(RwLock::new(HashSet::new())),
+            file_names: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+
+    /// Returns the cached put.io file/folder name for a `file_id`, if known.
+    pub async fn get_file_name(&self, file_id: i64) -> Option<String> {
+        self.file_names.read().await.get(&file_id).cloned()
+    }
+
+    /// Caches the put.io file/folder name for a `file_id`.
+    pub async fn set_file_name(&self, file_id: i64, name: String) {
+        self.file_names.write().await.insert(file_id, name);
     }
 
     /// Marks a transfer's local download as fully finished (pulled home).

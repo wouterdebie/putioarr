@@ -203,6 +203,7 @@ pub(crate) async fn handle_torrent_get(
 
     let transmission_transfers = transfers.into_iter().map(|t| {
         let app_data = app_data.clone();
+        let api_token = api_token.to_string();
         async move {
             let mut tt: TransmissionTorrent = t.clone().into();
             // Get the correct download directory from state if available
@@ -213,6 +214,29 @@ pub(crate) async fn handle_torrent_get(
                 ).await;
             } else {
                 tt.download_dir = app_data.config.download_directory.clone();
+            }
+            // put.io's transfer name often differs from the actual downloaded
+            // file/folder name (e.g. an indexer prefix like "www.foo.org - "),
+            // but the *arr locates the download at <download_dir>/<name>. Report
+            // the real put.io file/folder name (the one we download into) so the
+            // import doesn't fail with "No files found eligible for import" (#20).
+            if let Some(file_id) = t.file_id {
+                let resolved = match app_data.state.get_file_name(file_id).await {
+                    Some(name) => Some(name),
+                    None => match putio::list_files(&api_token, file_id).await {
+                        Ok(r) => {
+                            app_data.state.set_file_name(file_id, r.parent.name.clone()).await;
+                            Some(r.parent.name)
+                        }
+                        Err(e) => {
+                            warn!("Could not resolve put.io file name for {}: {}", file_id, e);
+                            None
+                        }
+                    },
+                };
+                if let Some(name) = resolved {
+                    tt.name = name;
+                }
             }
             // put.io marks a transfer complete as soon as *its own* (cloud)
             // download finishes, but the files don't exist on local disk until
