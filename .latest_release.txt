@@ -1,7 +1,66 @@
-# 0.6.5
-Persist transfer state in put.io key-value config store
+# 0.6.6
+Merge pull request #26 from bugrax/main
 
-Back StateManager with put.io's per-user /v2/config key-value store instead
-of a volatile in-memory HashMap. State is loaded on startup and written
-through on each mutation, so category/download-dir mappings survive restarts
-and transfers route to the correct directory.
+Skip unmanaged transfers, complete only after local download, and make downloads resilient (fixes #9, #16)
+Create the destination directory before downloading
+
+A File target can be handled before its sibling Directory target, and
+external cleanup can remove an emptied folder, leaving fetch() to fail
+with No such file or directory — which the resume/retry loop would then
+spin on. Ensure the parent directory exists before writing.
+
+Resume interrupted downloads instead of restarting
+
+A large download that stalls mid-stream was restarted from zero on the
+next attempt, so on a flaky put.io connection big files could loop
+forever and never finish. put.io serves Range requests (206 Partial
+Content), so retry the download and resume from the bytes already on
+disk via a Range header, appending to the partial file until complete.
+
+Only report a transfer complete after local download finishes (#16)
+
+put.io marks a transfer complete as soon as its own cloud download
+finishes, but the files don't exist on local disk until putioarr has
+pulled them down. Reporting completion to Sonarr/Radarr at that point
+makes them try to import files that aren't there yet, leaving the queue
+stuck on 'No files found eligible for import'.
+
+Track which transfers have finished downloading locally (StateManager
+local_complete set, marked when orchestration emits Downloaded) and, in
+the Transmission torrent-get response, keep a transfer in a downloading
+state until its local download is done — even if put.io already reports
+it complete/seeding.
+
+Fix typo in config template comment (downloding -> downloading)
+
+Reuse a shared reqwest client across downloads
+
+Build the HTTP client once and store it in AppData instead of
+constructing a new reqwest::Client for every fetch, so connections are
+pooled across downloads. The per-chunk inactivity timeout added earlier
+already bounds post-connect stalls.
+
+Add stall timeout to download stream
+
+The connect timeout added earlier only covers establishing the
+connection. If put.io stops sending data mid-download, the worker would
+hang forever in the byte-stream loop, eventually stalling every download
+worker and halting all transfers.
+
+Wrap each chunk read in a 60s timeout so a stalled download fails and
+the worker moves on instead of hanging.
+
+Fix: skip unmanaged transfers and add download timeout
+
+Resolves hang when the put.io account contains transfers not added by
+putioarr (e.g. a manually-maintained Watch List). Previously every
+downloadable transfer was queued, and the orchestration worker would
+block forever on a stalled/seeding transfer because the download used
+reqwest::get with no timeout (upstream issue #9).
+
+- Add is_managed(): only process transfers that have stored
+  category/download-dir state, unless the new download_unmanaged option
+  is enabled (default false).
+- Skip unmanaged transfers in both the resume and monitor loops.
+- fetch(): use a client with a 30s connect timeout and check the HTTP
+  status so a bad/stalled download fails fast instead of hanging.
