@@ -234,12 +234,16 @@ pub(crate) async fn handle_torrent_get(
             if let Some(file_id) = t.file_id {
                 let resolved = match app_data.state.get_file_name(file_id).await {
                     Some(name) => Some(name),
+                    // Don't re-hit the API for a lookup that recently failed
+                    // (e.g. a file removed from put.io); retry only after a TTL.
+                    None if app_data.state.name_lookup_suppressed(file_id).await => None,
                     None => match putio::list_files(&api_token, file_id).await {
                         Ok(r) => {
                             app_data.state.set_file_name(file_id, r.parent.name.clone()).await;
                             Some(r.parent.name)
                         }
                         Err(e) => {
+                            app_data.state.mark_name_failed(file_id).await;
                             warn!("Could not resolve put.io file name for {}: {}", file_id, e);
                             None
                         }

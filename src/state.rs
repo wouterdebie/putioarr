@@ -4,6 +4,7 @@ use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 
 /// Key under which putioarr stores its transfer state in put.io's per-user
@@ -36,6 +37,11 @@ pub struct StateManager {
     /// locate the download (see issue #20). A file_id's name never changes once
     /// downloaded, so caching it avoids an API call on every torrent-get.
     file_names: Arc<RwLock<HashMap<i64, String>>>,
+    /// Negative cache of `file_id`s whose name lookup failed, with the time of
+    /// the last attempt. A file may have been removed from put.io (a persistent
+    /// 404); without this, every torrent-get would re-hit the API and re-log a
+    /// warning. Retries are suppressed until [`Self::NAME_FAILURE_TTL`] passes.
+    failed_names: Arc<RwLock<HashMap<i64, Instant>>>,
 }
 
 impl StateManager {
@@ -45,24 +51,45 @@ impl StateManager {
             transfers: Arc::new(RwLock::new(HashMap::new())),
             local_complete: Arc::new(RwLock::new(HashSet::new())),
             file_names: Arc::new(RwLock::new(HashMap::new())),
+            failed_names: Arc::new(RwLock::new(HashMap::new())),
         }
     }
+
+    /// How long to suppress retrying a failed file-name lookup.
+    const NAME_FAILURE_TTL: Duration = Duration::from_secs(600);
 
     /// Returns the cached put.io file/folder name for a `file_id`, if known.
     pub async fn get_file_name(&self, file_id: i64) -> Option<String> {
         self.file_names.read().await.get(&file_id).cloned()
     }
 
-    /// Caches the put.io file/folder name for a `file_id`.
+    /// Caches the put.io file/folder name for a `file_id` and clears any prior
+    /// failure recorded for it.
     pub async fn set_file_name(&self, file_id: i64, name: String) {
         self.file_names.write().await.insert(file_id, name);
+        self.failed_names.write().await.remove(&file_id);
     }
 
-    /// Drops cached file names for any `file_id` not in `keep`, so the cache
-    /// stays bounded to the transfers currently on the account instead of
-    /// growing without limit over the lifetime of the process.
+    /// Records that resolving the name for `file_id` just failed.
+    pub async fn mark_name_failed(&self, file_id: i64) {
+        self.failed_names.write().await.insert(file_id, Instant::now());
+    }
+
+    /// Returns true if `file_id`'s name lookup failed recently and shouldn't be
+    /// retried yet, avoiding repeated API calls/warnings for persistent errors.
+    pub async fn name_lookup_suppressed(&self, file_id: i64) -> bool {
+        match self.failed_names.read().await.get(&file_id) {
+            Some(at) => at.elapsed() < Self::NAME_FAILURE_TTL,
+            None => false,
+        }
+    }
+
+    /// Drops cached file names (and failure markers) for any `file_id` not in
+    /// `keep`, so the caches stay bounded to the transfers currently on the
+    /// account instead of growing without limit over the lifetime of the process.
     pub async fn retain_file_names(&self, keep: &HashSet<i64>) {
         self.file_names.write().await.retain(|id, _| keep.contains(id));
+        self.failed_names.write().await.retain(|id, _| keep.contains(id));
     }
 
     /// Marks a transfer's local download as fully finished (pulled home).
