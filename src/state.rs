@@ -2,7 +2,7 @@ use crate::services::putio;
 use anyhow::Result;
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -26,6 +26,10 @@ pub struct TransferState {
 pub struct StateManager {
     api_token: String,
     transfers: Arc<RwLock<HashMap<String, TransferState>>>,
+    /// Transfer ids whose files putioarr has finished downloading to local
+    /// disk. Used to avoid telling the *arr a download is complete before the
+    /// files actually exist locally (see issue #16).
+    local_complete: Arc<RwLock<HashSet<u64>>>,
 }
 
 impl StateManager {
@@ -33,7 +37,23 @@ impl StateManager {
         Self {
             api_token,
             transfers: Arc::new(RwLock::new(HashMap::new())),
+            local_complete: Arc::new(RwLock::new(HashSet::new())),
         }
+    }
+
+    /// Marks a transfer's local download as fully finished (pulled home).
+    pub async fn mark_local_complete(&self, id: u64) {
+        self.local_complete.write().await.insert(id);
+    }
+
+    /// Returns true once putioarr has finished downloading the transfer locally.
+    pub async fn is_local_complete(&self, id: u64) -> bool {
+        self.local_complete.read().await.contains(&id)
+    }
+
+    /// Forgets a transfer's local-complete marker (e.g. after cleanup).
+    pub async fn clear_local_complete(&self, id: u64) {
+        self.local_complete.write().await.remove(&id);
     }
 
     /// Loads persisted state from put.io into the in-memory cache. Should be
