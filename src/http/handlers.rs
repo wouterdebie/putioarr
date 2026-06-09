@@ -12,6 +12,7 @@ use lava_torrent::torrent::v1::Torrent;
 use log::{error, info, warn};
 use magnet_url::Magnet;
 use serde_json::json;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 fn determine_category(download_dir: &str, config: &Config) -> String {
@@ -201,6 +202,12 @@ pub(crate) async fn handle_torrent_get(
             Vec::new()
         }
     };
+
+    // Keep the file-name cache bounded to the transfers currently on the
+    // account, dropping cached entries for transfers that no longer exist so it
+    // doesn't grow without limit over the lifetime of the process.
+    let active_file_ids: HashSet<i64> = transfers.iter().filter_map(|t| t.file_id).collect();
+    app_data.state.retain_file_names(&active_file_ids).await;
 
     // Allocate the token once and share it cheaply (refcount bump) with each
     // per-transfer task, rather than allocating a new String per transfer.

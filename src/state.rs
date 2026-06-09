@@ -58,6 +58,13 @@ impl StateManager {
         self.file_names.write().await.insert(file_id, name);
     }
 
+    /// Drops cached file names for any `file_id` not in `keep`, so the cache
+    /// stays bounded to the transfers currently on the account instead of
+    /// growing without limit over the lifetime of the process.
+    pub async fn retain_file_names(&self, keep: &HashSet<i64>) {
+        self.file_names.write().await.retain(|id, _| keep.contains(id));
+    }
+
     /// Marks a transfer's local download as fully finished (pulled home).
     pub async fn mark_local_complete(&self, id: u64) {
         self.local_complete.write().await.insert(id);
