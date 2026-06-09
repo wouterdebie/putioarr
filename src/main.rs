@@ -126,6 +126,9 @@ pub struct ArrConfig {
 pub struct AppData {
     pub config: Config,
     pub state: state::StateManager,
+    /// Shared HTTP client, reused across all downloads so connections are
+    /// pooled instead of building a new client per fetch.
+    pub http: reqwest::Client,
 }
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -181,9 +184,14 @@ async fn main() -> Result<()> {
 
             info!("Starting putioarr, version {}", VERSION);
 
+            let http = reqwest::Client::builder()
+                .connect_timeout(std::time::Duration::from_secs(30))
+                .build()
+                .expect("building shared reqwest client");
             let app_data = web::Data::new(AppData {
                 config: config.clone(),
                 state: state::StateManager::new(config.putio.api_key.clone()),
+                http,
             });
 
             match putio::account_info(&app_data.config.putio.api_key).await {

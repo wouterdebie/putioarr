@@ -57,7 +57,7 @@ async fn download_target(app_data: &Data<AppData>, target: &DownloadTarget) -> R
             // Delete file if already exists
             if !Path::new(&target.to).exists() {
                 info!("{}: download {}", &target, "started".yellow());
-                match fetch(target, app_data.config.uid).await {
+                match fetch(target, app_data.config.uid, &app_data.http).await {
                     Ok(_) => info!("{}: download {}", &target, "succeeded".green()),
                     Err(e) => {
                         error!("{}: download {}: {}", &target, "failed".red(), e);
@@ -72,18 +72,14 @@ async fn download_target(app_data: &Data<AppData>, target: &DownloadTarget) -> R
     Ok(())
 }
 
-async fn fetch(target: &DownloadTarget, uid: u32) -> Result<()> {
+async fn fetch(target: &DownloadTarget, uid: u32, client: &reqwest::Client) -> Result<()> {
     let tmp_path = format!("{}.downloading", &target.to);
     let mut tmp_file = tokio::fs::File::create(&tmp_path).await?;
 
     let url = target.from.clone().context("No URL found")?;
 
-    // Use an explicit client with a connect timeout so a stalled connection to
-    // put.io fails fast instead of hanging the orchestration worker forever
-    // (which would block all other transfers — see issue #9).
-    let client = reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(30))
-        .build()?;
+    // Reuse the shared client (built with a connect timeout) so connections
+    // are pooled across downloads instead of building one per fetch.
     let response = client.get(url).send().await?;
     if !response.status().is_success() {
         bail!("download failed: HTTP {}", response.status());
