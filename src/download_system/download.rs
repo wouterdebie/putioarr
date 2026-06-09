@@ -90,8 +90,17 @@ async fn fetch(target: &DownloadTarget, uid: u32) -> Result<()> {
     }
     let mut byte_stream = response.bytes_stream();
 
-    while let Some(item) = byte_stream.next().await {
-        tokio::io::copy(&mut item?.as_ref(), &mut tmp_file).await?;
+    // Guard each chunk read with a timeout. If put.io stops sending data
+    // mid-stream, the download fails instead of hanging the worker forever
+    // (which would eventually stall every download worker — see issue #9).
+    loop {
+        match tokio::time::timeout(std::time::Duration::from_secs(60), byte_stream.next()).await {
+            Ok(Some(item)) => {
+                tokio::io::copy(&mut item?.as_ref(), &mut tmp_file).await?;
+            }
+            Ok(None) => break,
+            Err(_) => bail!("download stalled: no data received for 60s"),
+        }
     }
     if Uid::effective().is_root() {
         tmp_path.clone().set_owner(uid)?;
