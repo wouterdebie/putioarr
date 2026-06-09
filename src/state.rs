@@ -58,7 +58,7 @@ impl StateManager {
         let mut map = self.arr_error_logged.write().await;
         let now = Instant::now();
         match map.get(app) {
-            Some(at) if now.duration_since(*at) < Self::ARR_ERROR_LOG_INTERVAL => false,
+            Some(at) if now.saturating_duration_since(*at) < Self::ARR_ERROR_LOG_INTERVAL => false,
             _ => {
                 map.insert(app.to_string(), now);
                 true
