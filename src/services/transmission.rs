@@ -122,7 +122,7 @@ impl From<String> for TransmissionTorrentStatus {
     fn from(value: String) -> Self {
         match value.to_uppercase().as_str() {
             "STOPPED" | "COMPLETED" | "ERROR" => Self::Stopped,
-            "CHECKWAIT" | "PREPARING_DOWNLOAD" => Self::CheckWait,
+            "CHECKWAIT" | "PREPARING_DOWNLOAD" | "WAITING" => Self::CheckWait,
             "CHECK" | "COMPLETING" => Self::Check,
             "QUEUED" | "IN_QUEUE" => Self::Queued,
             "DOWNLOADING" => Self::Downloading,
