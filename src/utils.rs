@@ -32,6 +32,12 @@ polling_interval = 10
 # Optional skip directories when downloding, default ["sample", "extras"]
 skip_directories = ["sample", "extras"]
 
+# Optional. When false (default), only download transfers that putioarr added on
+# behalf of an *arr. Transfers added directly on put.io (e.g. a manual Watch List)
+# are ignored, so the account can be shared and putioarr won't hang on seeding
+# transfers. Set to true to download every transfer on the account.
+download_unmanaged = false
+
 # Optional number of orchestration workers, default 10. Unless there are many changes coming from
 # put.io, you shouldn't have to touch this number. 10 is already overkill.
 orchestration_workers = 10

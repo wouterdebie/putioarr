@@ -240,6 +240,22 @@ pub enum TargetType {
 }
 
 // Check for new putio transfers and if they qualify, send them on for download
+/// Returns true if this transfer is managed by putioarr, i.e. it has stored
+/// category/download-dir state because *it* uploaded it on behalf of an *arr.
+/// Transfers added directly on put.io (e.g. a manually-maintained "Watch List")
+/// have no state. Unless the user opts in via `download_unmanaged`, those are
+/// ignored so putioarr does not try to download the entire put.io account and
+/// hang on seeding transfers (see upstream issue #9).
+async fn is_managed(app_data: &Data<AppData>, putio_transfer: &PutIOTransfer) -> bool {
+    if app_data.config.download_unmanaged {
+        return true;
+    }
+    match &putio_transfer.hash {
+        Some(hash) => app_data.state.get_transfer(hash).await.is_some(),
+        None => false,
+    }
+}
+
 pub async fn produce_transfers(app_data: Data<AppData>, tx: Sender<TransferMessage>) -> Result<()> {
     let putio_check_interval = std::time::Duration::from_secs(app_data.config.polling_interval);
     let mut seen = Vec::<u64>::new();
@@ -256,7 +272,7 @@ pub async fn produce_transfers(app_data: Data<AppData>, tx: Sender<TransferMessa
     {
         let name = putio_transfer.name.clone().unwrap_or("??".to_string());
         let mut transfer = Transfer::from(app_data.clone(), putio_transfer);
-        if putio_transfer.is_downloadable() {
+        if putio_transfer.is_downloadable() && is_managed(&app_data, putio_transfer).await {
             info!("Getting download target for {name}");
             let targets = transfer.get_download_targets().await;
             if targets.is_err() {
@@ -289,13 +305,16 @@ pub async fn produce_transfers(app_data: Data<AppData>, tx: Sender<TransferMessa
                 }
                 let transfer = Transfer::from(app_data.clone(), putio_transfer);
 
-                if let Some(hash) = &putio_transfer.hash {
-                    if app_data.state.get_transfer(hash).await.is_none() {
-                        warn!(
-                            "{}: no stored category/download-dir for hash {} — falling back to default download_directory ({}). This transfer was likely uploaded before putioarr started, or arr did not send a download-dir we could match to a category.",
-                            transfer, hash, app_data.config.download_directory
-                        );
-                    }
+                // Skip transfers we don't manage (e.g. a manual Watch List) unless
+                // `download_unmanaged` is set. This prevents putioarr from trying to
+                // download the whole account and hanging on seeding transfers (#9).
+                if !is_managed(&app_data, putio_transfer).await {
+                    debug!(
+                        "{}: not managed by putioarr (no stored category/download-dir), skipping",
+                        transfer
+                    );
+                    seen.push(putio_transfer.id);
+                    continue;
                 }
 
                 info!("{}: ready for download", transfer);

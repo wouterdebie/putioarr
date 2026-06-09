@@ -77,7 +77,18 @@ async fn fetch(target: &DownloadTarget, uid: u32) -> Result<()> {
     let mut tmp_file = tokio::fs::File::create(&tmp_path).await?;
 
     let url = target.from.clone().context("No URL found")?;
-    let mut byte_stream = reqwest::get(url).await?.bytes_stream();
+
+    // Use an explicit client with a connect timeout so a stalled connection to
+    // put.io fails fast instead of hanging the orchestration worker forever
+    // (which would block all other transfers — see issue #9).
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(30))
+        .build()?;
+    let response = client.get(url).send().await?;
+    if !response.status().is_success() {
+        bail!("download failed: HTTP {}", response.status());
+    }
+    let mut byte_stream = response.bytes_stream();
 
     while let Some(item) = byte_stream.next().await {
         tokio::io::copy(&mut item?.as_ref(), &mut tmp_file).await?;

@@ -56,6 +56,13 @@ pub struct Config {
     skip_directories: Vec<String>,
     uid: u32,
     username: String,
+    /// When true, download every transfer found on the put.io account, including
+    /// ones not added by putioarr (e.g. a manually-maintained Watch List). When
+    /// false (default), only download transfers putioarr added on behalf of an
+    /// *arr. Keeping this false avoids hanging on seeding transfers (issue #9) and
+    /// lets the put.io account be shared with manual downloads.
+    #[serde(default)]
+    download_unmanaged: bool,
     putio: PutioConfig,
     sonarr: Option<ArrConfig>,
     radarr: Option<ArrConfig>,
@@ -137,6 +144,7 @@ async fn main() -> Result<()> {
                 .join(Serialized::default("polling_interval", 10))
                 .join(Serialized::default("port", 9091))
                 .join(Serialized::default("uid", 1000))
+                .join(Serialized::default("download_unmanaged", false))
                 .join(Serialized::default(
                     "skip_directories",
                     vec!["sample", "extras"],
