@@ -12,6 +12,7 @@ use lava_torrent::torrent::v1::Torrent;
 use log::{error, info, warn};
 use magnet_url::Magnet;
 use serde_json::json;
+use std::sync::Arc;
 
 fn determine_category(download_dir: &str, config: &Config) -> String {
     let arrs = config.all_arrs();
@@ -201,9 +202,12 @@ pub(crate) async fn handle_torrent_get(
         }
     };
 
+    // Allocate the token once and share it cheaply (refcount bump) with each
+    // per-transfer task, rather than allocating a new String per transfer.
+    let api_token: Arc<str> = Arc::from(api_token);
     let transmission_transfers = transfers.into_iter().map(|t| {
         let app_data = app_data.clone();
-        let api_token = api_token.to_string();
+        let api_token = Arc::clone(&api_token);
         async move {
             let mut tt: TransmissionTorrent = t.clone().into();
             // Get the correct download directory from state if available
