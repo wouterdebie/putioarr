@@ -29,7 +29,7 @@ uid = 1000
 # Optional polling interval in secs, default 10.
 polling_interval = 10
 
-# Optional skip directories when downloding, default ["sample", "extras"]
+# Optional skip directories when downloading, default ["sample", "extras"]
 skip_directories = ["sample", "extras"]
 
 # Optional. When false (default), only download transfers that putioarr added on
