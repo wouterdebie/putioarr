@@ -63,13 +63,7 @@ impl Worker {
                     actix_rt::spawn(async { watch_for_import(app_data, tx, t).await });
                 }
                 TransferMessage::Imported(t) => {
-                    if t.is_orphan {
-                        // An orphan has no transfer record to remove or seed; just
-                        // delete the file from put.io (issue #34).
-                        actix_rt::spawn(async move { cleanup_orphan(app_data, t).await });
-                    } else {
-                        actix_rt::spawn(async { watch_seeding(app_data, t).await });
-                    }
+                    actix_rt::spawn(async { watch_seeding(app_data, t).await });
                 }
             }
         }
@@ -146,8 +140,24 @@ async fn watch_for_import(
                     panic!("{}: no idea how to handle", &top_level_target)
                 }
             };
-            let m = transfer.clone();
-            tx.send(TransferMessage::Imported(m)).await?;
+            // An orphan has no put.io transfer to remove or seed, so finish it
+            // here directly instead of routing an Imported message through a
+            // worker (which may be busy downloading and never pick it up),
+            // deleting the now-imported file from put.io (issue #34).
+            if transfer.is_orphan {
+                if let Some(file_id) = transfer.file_id {
+                    match putio::delete_file(&app_data.config.putio.api_key, file_id).await {
+                        Ok(_) => info!("{}: deleted orphan from put.io", transfer),
+                        Err(e) => {
+                            warn!("{}: failed to delete orphan from put.io: {}", transfer, e)
+                        }
+                    }
+                    app_data.state.remove_orphan(file_id).await;
+                }
+            } else {
+                let m = transfer.clone();
+                tx.send(TransferMessage::Imported(m)).await?;
+            }
 
             break;
         }
@@ -184,19 +194,5 @@ async fn watch_seeding(app_data: Data<AppData>, transfer: Transfer) -> Result<()
     }
 
     info!("{}: done seeding", transfer);
-    Ok(())
-}
-
-/// Cleanup for an orphaned watch-folder transfer once it's been imported: there
-/// is no put.io transfer to remove and nothing to seed, so just delete the file
-/// and stop reporting it to the *arr (issue #34).
-async fn cleanup_orphan(app_data: Data<AppData>, transfer: Transfer) -> Result<()> {
-    if let Some(file_id) = transfer.file_id {
-        match putio::delete_file(&app_data.config.putio.api_key, file_id).await {
-            Ok(_) => info!("{}: deleted orphan from put.io", transfer),
-            Err(e) => warn!("{}: failed to delete orphan from put.io: {}", transfer, e),
-        }
-        app_data.state.remove_orphan(file_id).await;
-    }
     Ok(())
 }
