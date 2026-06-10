@@ -187,6 +187,8 @@ pub struct FileResponse {
     pub id: i64,
     pub name: String,
     pub file_type: String,
+    #[serde(default)]
+    pub size: i64,
 }
 
 pub async fn list_files(api_token: &str, file_id: i64) -> Result<ListFileResponse> {

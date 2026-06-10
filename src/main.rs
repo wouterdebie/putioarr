@@ -63,6 +63,15 @@ pub struct Config {
     /// lets the put.io account be shared with manual downloads.
     #[serde(default)]
     download_unmanaged: bool,
+    /// put.io folder ids to additionally scan for *orphaned* completed files:
+    /// files that were downloaded but whose transfer record no longer exists
+    /// (e.g. put.io's "clear completed transfers" removes the transfer while
+    /// leaving the file in the folder). Since putioarr normally only discovers
+    /// work from `transfers/list`, such files would never be pulled. Any video
+    /// file here with no active transfer that isn't already imported is pulled
+    /// like a normal download (see issue #34). Empty (default) disables this.
+    #[serde(default)]
+    watch_folders: Vec<i64>,
     putio: PutioConfig,
     sonarr: Option<ArrConfig>,
     radarr: Option<ArrConfig>,

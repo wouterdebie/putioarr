@@ -3,6 +3,7 @@ use crate::{
         arr::ArrApp,
         putio::{self, PutIOTransfer},
     },
+    state::OrphanFile,
     AppData,
 };
 use actix_web::web::Data;
@@ -23,6 +24,11 @@ pub struct Transfer {
     pub transfer_id: u64,
     pub targets: Option<Vec<DownloadTarget>>,
     pub app_data: Data<AppData>,
+    /// True if this came from a watch-folder scan (an orphaned file with no
+    /// put.io transfer record) rather than `transfers/list`. Such transfers are
+    /// cleaned up by deleting the file directly, since there is no transfer to
+    /// remove or seeding to wait on (issue #34).
+    pub is_orphan: bool,
 }
 
 impl Transfer {
@@ -102,6 +108,22 @@ impl Transfer {
             targets: None,
             hash: transfer.hash.clone(),
             app_data,
+            is_orphan: false,
+        }
+    }
+
+    /// Builds a synthetic transfer for an orphaned watch-folder file (one with
+    /// no put.io transfer record). The file_id doubles as the transfer id and is
+    /// formatted into a deterministic synthetic hash so the *arr can track it.
+    pub fn from_orphan(app_data: Data<AppData>, file_id: i64, name: String) -> Self {
+        Self {
+            transfer_id: file_id as u64,
+            name,
+            file_id: Some(file_id),
+            targets: None,
+            hash: Some(format!("{:040x}", file_id)),
+            app_data,
+            is_orphan: true,
         }
     }
 }
@@ -259,6 +281,9 @@ async fn is_managed(app_data: &Data<AppData>, putio_transfer: &PutIOTransfer) ->
 pub async fn produce_transfers(app_data: Data<AppData>, tx: Sender<TransferMessage>) -> Result<()> {
     let putio_check_interval = std::time::Duration::from_secs(app_data.config.polling_interval);
     let mut seen = Vec::<u64>::new();
+    // file_ids of orphaned watch-folder files we've already queued, so the scan
+    // doesn't re-queue them every poll.
+    let mut orphan_seen = Vec::<i64>::new();
 
     info!("Checking unfinished transfers");
     // We only need to check if something has been imported. Just by looking at the filesystem we
@@ -331,6 +356,16 @@ pub async fn produce_transfers(app_data: Data<AppData>, tx: Sender<TransferMessa
                 .collect();
             seen.retain(|t| active_ids.contains(t));
 
+            // Pull orphaned files from the configured watch folders (completed
+            // files whose transfer record no longer exists — see issue #34).
+            scan_watch_folders(
+                &app_data,
+                &tx,
+                &mut orphan_seen,
+                &list_transfer_response.transfers,
+            )
+            .await;
+
             // Log status when 60 seconds have passed since last time
             if start.elapsed().as_secs() >= 60 {
                 info!(
@@ -350,5 +385,133 @@ pub async fn produce_transfers(app_data: Data<AppData>, tx: Sender<TransferMessa
             warn!("List put.io transfers failed. Retrying..");
             continue;
         };
+    }
+}
+
+/// Heuristic: does this name look like a TV episode (SxxExx, or "Season")?
+/// Used to route an orphaned file to the Sonarr vs Radarr category folder.
+fn looks_like_episode(name: &str) -> bool {
+    let b = name.as_bytes();
+    let n = b.len();
+    let mut i = 0;
+    while i + 3 < n {
+        if (b[i] == b'S' || b[i] == b's') && b[i + 1].is_ascii_digit() {
+            let mut j = i + 1;
+            while j < n && b[j].is_ascii_digit() {
+                j += 1;
+            }
+            if j + 1 < n && (b[j] == b'E' || b[j] == b'e') && b[j + 1].is_ascii_digit() {
+                return true;
+            }
+        }
+        i += 1;
+    }
+    name.to_lowercase().contains("season")
+}
+
+/// Scans the configured `watch_folders` for orphaned completed files — files
+/// with no transfer record (e.g. removed by put.io's "clear completed") that
+/// `transfers/list` will never surface — and queues them for download like
+/// normal transfers so they don't get stranded on put.io (issue #34).
+async fn scan_watch_folders(
+    app_data: &Data<AppData>,
+    tx: &Sender<TransferMessage>,
+    orphan_seen: &mut Vec<i64>,
+    active_transfers: &[PutIOTransfer],
+) {
+    if app_data.config.watch_folders.is_empty() {
+        return;
+    }
+    let api_key = &app_data.config.putio.api_key;
+    let active_file_ids: Vec<i64> = active_transfers.iter().filter_map(|t| t.file_id).collect();
+
+    for folder_id in &app_data.config.watch_folders {
+        let resp = match putio::list_files(api_key, *folder_id).await {
+            Ok(r) => r,
+            Err(e) => {
+                warn!("watch folder {}: listing failed: {}", folder_id, e);
+                continue;
+            }
+        };
+        for file in &resp.files {
+            // Skip the result of an active transfer (handled the normal way) and
+            // anything we've already queued this run.
+            if active_file_ids.contains(&file.id) || orphan_seen.contains(&file.id) {
+                continue;
+            }
+
+            // Route to the matching *arr category folder based on the name.
+            let category = if looks_like_episode(&file.name) {
+                app_data
+                    .config
+                    .sonarr
+                    .as_ref()
+                    .and_then(|c| c.category.clone())
+            } else {
+                app_data
+                    .config
+                    .radarr
+                    .as_ref()
+                    .and_then(|c| c.category.clone())
+            };
+            let download_dir = match &category {
+                Some(c) => format!("{}/{}", app_data.config.download_directory, c),
+                None => app_data.config.download_directory.clone(),
+            };
+            let hash = format!("{:040x}", file.id);
+            if let Err(e) = app_data
+                .state
+                .add_transfer(
+                    hash.clone(),
+                    category.clone().unwrap_or_default(),
+                    download_dir.clone(),
+                )
+                .await
+            {
+                warn!("watch folder {}: storing state failed: {}", file.id, e);
+            }
+
+            let mut transfer = Transfer::from_orphan(app_data.clone(), file.id, file.name.clone());
+            let targets = match transfer.get_download_targets().await {
+                Ok(t) if !t.is_empty() => t,
+                Ok(_) => {
+                    // No downloadable (video) content — ignore it.
+                    orphan_seen.push(file.id);
+                    continue;
+                }
+                Err(e) => {
+                    warn!("{}: orphan target generation failed: {}", transfer, e);
+                    continue;
+                }
+            };
+            transfer.targets = Some(targets);
+
+            if transfer.is_imported().await {
+                // Already imported by the *arr — just clean it off put.io.
+                info!("{}: orphan already imported, deleting from put.io", transfer);
+                let _ = putio::delete_file(api_key, file.id).await;
+                orphan_seen.push(file.id);
+                continue;
+            }
+
+            app_data
+                .state
+                .add_orphan(OrphanFile {
+                    file_id: file.id,
+                    name: file.name.clone(),
+                    hash,
+                    size: file.size,
+                    download_dir,
+                })
+                .await;
+            info!("{}: orphan ready for download", transfer);
+            if tx
+                .send(TransferMessage::QueuedForDownload(transfer))
+                .await
+                .is_ok()
+            {
+                orphan_seen.push(file.id);
+            }
+        }
     }
 }

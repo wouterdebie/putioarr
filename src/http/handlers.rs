@@ -272,8 +272,38 @@ pub(crate) async fn handle_torrent_get(
             tt
         }
     });
-    let transmission_transfers: Vec<TransmissionTorrent> =
+    let mut transmission_transfers: Vec<TransmissionTorrent> =
         futures::future::join_all(transmission_transfers).await;
+
+    // Also report orphaned watch-folder files (which have no put.io transfer) as
+    // downloads, so the *arr imports them like any other completed download once
+    // putioarr has pulled them locally (issue #34).
+    for orphan in app_data.state.orphans().await {
+        let complete = app_data.state.is_local_complete(orphan.file_id as u64).await;
+        transmission_transfers.push(TransmissionTorrent {
+            id: orphan.file_id as u64,
+            hash_string: Some(orphan.hash),
+            name: orphan.name,
+            download_dir: orphan.download_dir,
+            total_size: orphan.size,
+            left_until_done: if complete { 0 } else { std::cmp::max(orphan.size, 1) },
+            is_finished: complete,
+            eta: 0,
+            status: if complete {
+                TransmissionTorrentStatus::Seeding
+            } else {
+                TransmissionTorrentStatus::Downloading
+            },
+            seconds_downloading: 0,
+            error_string: None,
+            downloaded_ever: if complete { orphan.size } else { 0 },
+            seed_ratio_limit: 0.0,
+            seed_ratio_mode: 0,
+            seed_idle_limit: 0,
+            seed_idle_mode: 0,
+            file_count: 1,
+        });
+    }
 
     let torrents = json!(transmission_transfers);
 
