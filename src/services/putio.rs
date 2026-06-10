@@ -34,6 +34,7 @@ pub async fn account_info(api_token: &str) -> Result<AccountInfoResponse> {
     let response = client
         .get("https://api.put.io/v2/account/info")
         .header("authorization", format!("Bearer {}", api_token))
+        .timeout(Duration::from_secs(30))
         .send()
         .await?;
 
@@ -197,6 +198,7 @@ pub async fn list_files(api_token: &str, file_id: i64) -> Result<ListFileRespons
             file_id
         ))
         .header("authorization", format!("Bearer {}", api_token))
+        .timeout(Duration::from_secs(30))
         .send()
         .await?;
 
@@ -221,6 +223,7 @@ pub async fn url(api_token: &str, file_id: i64) -> Result<String> {
     let response = client
         .get(format!("https://api.put.io/v2/files/{}/url", file_id))
         .header("authorization", format!("Bearer {}", api_token))
+        .timeout(Duration::from_secs(30))
         .send()
         .await?;
 
