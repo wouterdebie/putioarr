@@ -94,7 +94,7 @@ impl Worker {
             targets.iter().map(|_| async_channel::unbounded()).collect();
 
         for (i, target) in targets.iter().enumerate() {
-            let (done_tx, _) = done_channels[i].clone();
+            let done_tx = done_channels[i].0.clone();
             self.dtx
                 .send(DownloadTargetMessage {
                     download_target: target.clone(),

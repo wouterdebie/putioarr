@@ -305,7 +305,11 @@ pub async fn produce_transfers(app_data: Data<AppData>, tx: Sender<TransferMessa
     // Watch-folder scans hit put.io once per folder, so run them on their own
     // configurable interval rather than every poll to avoid extra API traffic
     // (issue #34).
-    let orphan_scan_interval = Duration::from_secs(app_data.config.watch_folder_interval_secs);
+    // Clamp to >= 1s so a misconfigured 0 doesn't become a zero Duration that
+    // scans on every poll. The effective floor is the polling interval anyway,
+    // since the scan only runs inside this loop.
+    let orphan_scan_interval =
+        Duration::from_secs(app_data.config.watch_folder_interval_secs.max(1));
     let mut last_orphan_scan: Option<Instant> = None;
 
     info!("Checking unfinished transfers");
@@ -514,7 +518,9 @@ async fn scan_watch_folders(
             }
 
             info!("{}: orphan ready for download", transfer);
-            let hash = format!("{:040x}", file.id as u64);
+            // Reuse the hash already derived by `from_orphan` so there's a single
+            // source of truth for the synthetic hash.
+            let hash = transfer.hash.clone().unwrap_or_default();
             // Only start tracking/reporting the orphan once it's actually been
             // queued, so a failed send can't leave it advertised via torrent-get
             // as a download that never happens.

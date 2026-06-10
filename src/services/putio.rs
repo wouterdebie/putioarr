@@ -198,6 +198,7 @@ pub async fn list_files(api_token: &str, file_id: i64) -> Result<ListFileRespons
             "https://api.put.io/v2/files/list?parent_id={}",
             file_id
         ))
+        .timeout(Duration::from_secs(30))
         .header("authorization", format!("Bearer {}", api_token))
         .send()
         .await?;
@@ -222,6 +223,7 @@ pub async fn url(api_token: &str, file_id: i64) -> Result<String> {
     let client = reqwest::Client::new();
     let response = client
         .get(format!("https://api.put.io/v2/files/{}/url", file_id))
+        .timeout(Duration::from_secs(30))
         .header("authorization", format!("Bearer {}", api_token))
         .send()
         .await?;
