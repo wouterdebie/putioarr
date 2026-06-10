@@ -49,48 +49,13 @@ impl Worker {
             let app_data = self.app_data.clone();
             match msg {
                 TransferMessage::QueuedForDownload(t) => {
-                    info!("{}: download {}", t, "started".yellow());
-                    let targets = t.get_download_targets().await?;
-                    // Create a communications channel for the download worker to communicate status back.
-                    let done_channels: &Vec<(
-                        Sender<DownloadDoneStatus>,
-                        Receiver<DownloadDoneStatus>,
-                    )> = &targets.iter().map(|_| async_channel::unbounded()).collect();
-
-                    for (i, target) in targets.iter().enumerate() {
-                        let (done_tx, _) = done_channels[i].clone();
-                        self.dtx
-                            .send(DownloadTargetMessage {
-                                download_target: target.clone(),
-                                tx: done_tx,
-                            })
-                            .await?;
-                    }
-
-                    // Wait for all the workers having sent back their status.
-                    let mut all_downloaded = vec![];
-                    for (_, done_rx) in done_channels {
-                        all_downloaded.push(done_rx.recv().await?);
-                    }
-
-                    // Check if all are success
-                    if all_downloaded.iter().all(|d| match d {
-                        DownloadDoneStatus::Success => true,
-                        DownloadDoneStatus::Failed => false,
-                    }) {
-                        info!("{}: download {}", t, "done".blue());
-                        // The files now exist locally, so it's safe to report
-                        // this transfer as complete to the *arr (see issue #16).
-                        self.app_data.state.mark_local_complete(t.transfer_id).await;
-                        self.tx
-                            .send(TransferMessage::Downloaded(Transfer {
-                                targets: Some(targets),
-                                ..t
-                            }))
-                            .await?;
-                    } else {
-                        // TODO: figure out what to do here..
-                        warn!("{}: not all targets downloaded", t)
+                    // Handle each transfer in a way that can't take the worker
+                    // down: a `?` here used to bubble up and end work(), which
+                    // (silently) killed the worker and, via the dropped done
+                    // channels, cascaded to the others until everything stalled
+                    // (issue #34). Log and carry on instead.
+                    if let Err(e) = self.handle_queued(t).await {
+                        warn!("download orchestration error (worker continuing): {}", e);
                     }
                 }
                 TransferMessage::Downloaded(t) => {
@@ -108,6 +73,52 @@ impl Worker {
                 }
             }
         }
+    }
+
+    /// Downloads all of a transfer's targets and, on full success, marks it
+    /// complete and forwards it for import. Returns Err on any failure so the
+    /// caller can log it without ending the worker (see issue #34).
+    async fn handle_queued(&self, t: Transfer) -> Result<()> {
+        info!("{}: download {}", t, "started".yellow());
+        let targets = t.get_download_targets().await?;
+        // A status channel per target for the download workers to report back.
+        let done_channels: Vec<(Sender<DownloadDoneStatus>, Receiver<DownloadDoneStatus>)> =
+            targets.iter().map(|_| async_channel::unbounded()).collect();
+
+        for (i, target) in targets.iter().enumerate() {
+            let (done_tx, _) = done_channels[i].clone();
+            self.dtx
+                .send(DownloadTargetMessage {
+                    download_target: target.clone(),
+                    tx: done_tx,
+                })
+                .await?;
+        }
+
+        // Wait for all the workers having sent back their status.
+        let mut all_downloaded = vec![];
+        for (_, done_rx) in &done_channels {
+            all_downloaded.push(done_rx.recv().await?);
+        }
+
+        if all_downloaded
+            .iter()
+            .all(|d| matches!(d, DownloadDoneStatus::Success))
+        {
+            info!("{}: download {}", t, "done".blue());
+            // The files now exist locally, so it's safe to report this transfer
+            // as complete to the *arr (see issue #16).
+            self.app_data.state.mark_local_complete(t.transfer_id).await;
+            self.tx
+                .send(TransferMessage::Downloaded(Transfer {
+                    targets: Some(targets),
+                    ..t
+                }))
+                .await?;
+        } else {
+            warn!("{}: not all targets downloaded", t);
+        }
+        Ok(())
     }
 }
 
