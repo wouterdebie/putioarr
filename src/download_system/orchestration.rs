@@ -117,6 +117,13 @@ impl Worker {
                 .await?;
         } else {
             warn!("{}: not all targets downloaded", t);
+            // Drop a failed orphan from tracking so a later watch-folder scan
+            // can retry it instead of it being suppressed forever (issue #34).
+            if t.is_orphan {
+                if let Some(file_id) = t.file_id {
+                    self.app_data.state.remove_orphan(file_id).await;
+                }
+            }
         }
         Ok(())
     }

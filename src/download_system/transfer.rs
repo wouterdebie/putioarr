@@ -89,6 +89,23 @@ impl Transfer {
         recurse_download_targets(&self.app_data, self.file_id.unwrap(), hash, None, true).await
     }
 
+    /// Like [`get_download_targets`] but with an explicit base directory instead
+    /// of looking one up from stored transfer state. Used for orphaned files,
+    /// which have no persisted state to route them (issue #34).
+    pub async fn get_download_targets_in(&self, base_path: &str) -> Result<Vec<DownloadTarget>> {
+        info!("{}: generating targets", self);
+        let default = "0000".to_string();
+        let hash = self.hash.as_ref().unwrap_or(&default).as_str();
+        recurse_download_targets(
+            &self.app_data,
+            self.file_id.unwrap(),
+            hash,
+            Some(base_path.to_string()),
+            true,
+        )
+        .await
+    }
+
     pub fn get_top_level(&self) -> DownloadTarget {
         self.targets
             .clone()
@@ -281,9 +298,6 @@ async fn is_managed(app_data: &Data<AppData>, putio_transfer: &PutIOTransfer) ->
 pub async fn produce_transfers(app_data: Data<AppData>, tx: Sender<TransferMessage>) -> Result<()> {
     let putio_check_interval = std::time::Duration::from_secs(app_data.config.polling_interval);
     let mut seen = Vec::<u64>::new();
-    // file_ids of orphaned watch-folder files we've already queued, so the scan
-    // doesn't re-queue them every poll.
-    let mut orphan_seen = HashSet::<i64>::new();
 
     info!("Checking unfinished transfers");
     // We only need to check if something has been imported. Just by looking at the filesystem we
@@ -358,13 +372,7 @@ pub async fn produce_transfers(app_data: Data<AppData>, tx: Sender<TransferMessa
 
             // Pull orphaned files from the configured watch folders (completed
             // files whose transfer record no longer exists — see issue #34).
-            scan_watch_folders(
-                &app_data,
-                &tx,
-                &mut orphan_seen,
-                &list_transfer_response.transfers,
-            )
-            .await;
+            scan_watch_folders(&app_data, &tx, &list_transfer_response.transfers).await;
 
             // Log status when 60 seconds have passed since last time
             if start.elapsed().as_secs() >= 60 {
@@ -406,7 +414,10 @@ fn looks_like_episode(name: &str) -> bool {
         }
         i += 1;
     }
-    name.to_lowercase().contains("season")
+    // Case-insensitive "season" check without allocating a lowercased copy.
+    name.as_bytes()
+        .windows(6)
+        .any(|w| w.eq_ignore_ascii_case(b"season"))
 }
 
 /// Scans the configured `watch_folders` for orphaned completed files — files
@@ -416,7 +427,6 @@ fn looks_like_episode(name: &str) -> bool {
 async fn scan_watch_folders(
     app_data: &Data<AppData>,
     tx: &Sender<TransferMessage>,
-    orphan_seen: &mut HashSet<i64>,
     active_transfers: &[PutIOTransfer],
 ) {
     if app_data.config.watch_folders.is_empty() {
@@ -434,13 +444,21 @@ async fn scan_watch_folders(
             }
         };
         for file in &resp.files {
+            // Only media (and folders that may contain media); skip stray
+            // images/nfos and anything with an unusable (negative) id.
+            if file.id < 0 || !matches!(file.file_type.as_str(), "FOLDER" | "VIDEO" | "AUDIO") {
+                continue;
+            }
             // Skip the result of an active transfer (handled the normal way) and
-            // anything we've already queued this run.
-            if active_file_ids.contains(&file.id) || orphan_seen.contains(&file.id) {
+            // any orphan we're already pulling. Using `has_orphan` as the
+            // "in progress" marker keeps tracking bounded and, since a failed
+            // orphan is dropped from it, lets a later poll retry it.
+            if active_file_ids.contains(&file.id) || app_data.state.has_orphan(file.id).await {
                 continue;
             }
 
-            // Route to the matching *arr category folder based on the name.
+            // Route to the matching *arr category folder based on the name. The
+            // base dir is passed explicitly so orphans need no persisted state.
             let category = if looks_like_episode(&file.name) {
                 app_data
                     .config
@@ -458,30 +476,11 @@ async fn scan_watch_folders(
                 Some(c) => format!("{}/{}", app_data.config.download_directory, c),
                 None => app_data.config.download_directory.clone(),
             };
-            let hash = format!("{:040x}", file.id as u64);
-            if let Err(e) = app_data
-                .state
-                .add_transfer(
-                    hash.clone(),
-                    category.clone().unwrap_or_default(),
-                    download_dir.clone(),
-                )
-                .await
-            {
-                warn!(
-                    "watch folder {}: storing state for file {} failed: {}",
-                    folder_id, file.id, e
-                );
-            }
 
             let mut transfer = Transfer::from_orphan(app_data.clone(), file.id, file.name.clone());
-            let targets = match transfer.get_download_targets().await {
+            let targets = match transfer.get_download_targets_in(&download_dir).await {
                 Ok(t) if !t.is_empty() => t,
-                Ok(_) => {
-                    // No downloadable (video) content — ignore it.
-                    orphan_seen.insert(file.id);
-                    continue;
-                }
+                Ok(_) => continue, // no downloadable (video) content
                 Err(e) => {
                     warn!("{}: orphan target generation failed: {}", transfer, e);
                     continue;
@@ -493,11 +492,11 @@ async fn scan_watch_folders(
                 // Already imported by the *arr — just clean it off put.io.
                 info!("{}: orphan already imported, deleting from put.io", transfer);
                 let _ = putio::delete_file(api_key, file.id).await;
-                orphan_seen.insert(file.id);
                 continue;
             }
 
             info!("{}: orphan ready for download", transfer);
+            let hash = format!("{:040x}", file.id as u64);
             // Only start tracking/reporting the orphan once it's actually been
             // queued, so a failed send can't leave it advertised via torrent-get
             // as a download that never happens.
@@ -516,7 +515,6 @@ async fn scan_watch_folders(
                         download_dir,
                     })
                     .await;
-                orphan_seen.insert(file.id);
             }
         }
     }

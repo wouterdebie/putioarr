@@ -279,7 +279,13 @@ pub(crate) async fn handle_torrent_get(
     // downloads, so the *arr imports them like any other completed download once
     // putioarr has pulled them locally (issue #34).
     for orphan in app_data.state.orphans().await {
-        let complete = app_data.state.is_local_complete(orphan.file_id as u64).await;
+        // put.io file ids are non-negative; guard the i64->u64 conversion so a
+        // bad value can't wrap into a wrong id / local-complete key.
+        let id = match u64::try_from(orphan.file_id) {
+            Ok(id) => id,
+            Err(_) => continue,
+        };
+        let complete = app_data.state.is_local_complete(id).await;
         // Keep size/left consistent: never report left_until_done > total_size
         // (size can be 0 if put.io omitted it).
         let size = orphan.size.max(0);
