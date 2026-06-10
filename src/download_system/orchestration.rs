@@ -144,6 +144,7 @@ async fn watch_for_import(
             let m = transfer.clone();
             tx.send(TransferMessage::Imported(m)).await?;
 
+            info!("{}: removed", transfer);
             break;
         }
         if started.elapsed() > MAX_IMPORT_WAIT {
@@ -157,7 +158,6 @@ async fn watch_for_import(
         }
         sleep(Duration::from_secs(app_data.config.polling_interval)).await;
     }
-    info!("{}: removed", transfer);
     Ok(())
 }
 
