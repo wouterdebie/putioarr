@@ -1,7 +1,22 @@
 use anyhow::{bail, Result};
 use reqwest::multipart;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::{collections::HashMap, time::Duration};
+use std::{collections::HashMap, sync::OnceLock, time::Duration};
+
+/// Shared, connection-pooled HTTP client for all put.io API calls. Building a
+/// fresh `reqwest::Client` per request (as the code did before) means no
+/// connection reuse; under load — e.g. resuming a large account, where targets
+/// are generated for every transfer — that churns through sockets/file
+/// descriptors and requests start hanging. Reuse one pooled client instead.
+fn http_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(30))
+            .build()
+            .expect("building shared put.io client")
+    })
+}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct PutIOTransfer {
@@ -30,7 +45,7 @@ pub struct AccountInfoResponse {
 }
 
 pub async fn account_info(api_token: &str) -> Result<AccountInfoResponse> {
-    let client = reqwest::Client::new();
+    let client = http_client();
     let response = client
         .get("https://api.put.io/v2/account/info")
         .header("authorization", format!("Bearer {}", api_token))
@@ -57,7 +72,7 @@ pub struct GetTransferResponse {
 
 /// Returns the user's transfers.
 pub async fn list_transfers(api_token: &str) -> Result<ListTransferResponse> {
-    let client = reqwest::Client::new();
+    let client = http_client();
     let response = client
         .get("https://api.put.io/v2/transfers/list")
         .timeout(Duration::from_secs(30))
@@ -73,7 +88,7 @@ pub async fn list_transfers(api_token: &str) -> Result<ListTransferResponse> {
 }
 
 pub async fn get_transfer(api_token: &str, transfer_id: u64) -> Result<GetTransferResponse> {
-    let client = reqwest::Client::new();
+    let client = http_client();
     let response = client
         .get(format!("https://api.put.io/v2/transfers/{}", transfer_id))
         .timeout(Duration::from_secs(10))
@@ -93,7 +108,7 @@ pub async fn get_transfer(api_token: &str, transfer_id: u64) -> Result<GetTransf
 }
 
 pub async fn remove_transfer(api_token: &str, transfer_id: u64) -> Result<()> {
-    let client = reqwest::Client::new();
+    let client = http_client();
     let form = multipart::Form::new().text("transfer_ids", transfer_id.to_string());
     let response = client
         .post("https://api.put.io/v2/transfers/remove")
@@ -115,7 +130,7 @@ pub async fn remove_transfer(api_token: &str, transfer_id: u64) -> Result<()> {
 }
 
 pub async fn delete_file(api_token: &str, file_id: i64) -> Result<()> {
-    let client = reqwest::Client::new();
+    let client = http_client();
     let form = multipart::Form::new().text("file_ids", file_id.to_string());
     let response = client
         .post("https://api.put.io/v2/files/delete")
@@ -137,7 +152,7 @@ pub async fn delete_file(api_token: &str, file_id: i64) -> Result<()> {
 }
 
 pub async fn add_transfer(api_token: &str, url: &str) -> Result<()> {
-    let client = reqwest::Client::new();
+    let client = http_client();
     let form = multipart::Form::new().text("url", url.to_string());
     let response = client
         .post("https://api.put.io/v2/transfers/add")
@@ -155,7 +170,7 @@ pub async fn add_transfer(api_token: &str, url: &str) -> Result<()> {
 }
 
 pub async fn upload_file(api_token: &str, bytes: &[u8]) -> Result<()> {
-    let client = reqwest::Client::new();
+    let client = http_client();
     let file_part = multipart::Part::bytes(bytes.to_owned()).file_name("foo.torrent");
 
     let form = reqwest::multipart::Form::new()
@@ -191,7 +206,7 @@ pub struct FileResponse {
 }
 
 pub async fn list_files(api_token: &str, file_id: i64) -> Result<ListFileResponse> {
-    let client = reqwest::Client::new();
+    let client = http_client();
     let response = client
         .get(format!(
             "https://api.put.io/v2/files/list?parent_id={}",
@@ -219,7 +234,7 @@ pub struct URLResponse {
 }
 
 pub async fn url(api_token: &str, file_id: i64) -> Result<String> {
-    let client = reqwest::Client::new();
+    let client = http_client();
     let response = client
         .get(format!("https://api.put.io/v2/files/{}/url", file_id))
         .header("authorization", format!("Bearer {}", api_token))
@@ -287,7 +302,7 @@ pub async fn get_config_value<T: DeserializeOwned>(
         value: Option<T>,
     }
 
-    let client = reqwest::Client::new();
+    let client = http_client();
     let response = client
         .get(format!("https://api.put.io/v2/config/{}", key))
         .timeout(Duration::from_secs(10))
@@ -308,7 +323,7 @@ pub async fn get_config_value<T: DeserializeOwned>(
 
 /// Stores a value in put.io's per-user, per-app key-value config store.
 pub async fn set_config_value<T: Serialize>(api_token: &str, key: &str, value: &T) -> Result<()> {
-    let client = reqwest::Client::new();
+    let client = http_client();
     let body = serde_json::json!({ "value": value });
     let response = client
         .put(format!("https://api.put.io/v2/config/{}", key))
