@@ -52,6 +52,12 @@ pub struct Config {
     orchestration_workers: usize,
     password: String,
     polling_interval: u64,
+    /// How long (seconds) to keep polling for a transfer to be imported before
+    /// giving up watching it. Bounds the per-transfer import-watch loop so a
+    /// transfer that never fully imports (e.g. one with a sample the *arr won't
+    /// import) can't accumulate and stall downloads. Default 7200 (2h).
+    #[serde(default)]
+    import_timeout_secs: u64,
     port: u16,
     skip_directories: Vec<String>,
     uid: u32,
@@ -145,6 +151,7 @@ async fn main() -> Result<()> {
                 .join(Serialized::default("orchestration_workers", 10))
                 .join(Serialized::default("loglevel", "info"))
                 .join(Serialized::default("polling_interval", 10))
+                .join(Serialized::default("import_timeout_secs", 7200u64))
                 .join(Serialized::default("port", 9091))
                 .join(Serialized::default("uid", 1000))
                 .join(Serialized::default("download_unmanaged", false))

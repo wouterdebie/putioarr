@@ -19,14 +19,6 @@ use tokio::{fs::metadata, time::sleep};
 
 use super::transfer::TransferMessage;
 
-/// How long to keep polling for a transfer to be imported before giving up.
-/// `is_imported()` requires *every* video file to be imported, but a transfer
-/// can contain a file the *arr will never import (e.g. a sample outside a
-/// `skip_directories` folder), which would otherwise make `watch_for_import`
-/// loop forever and accumulate until the process stalls (see issue #30).
-/// Genuine imports complete within a poll or two, so this bound is generous.
-const MAX_IMPORT_WAIT: Duration = Duration::from_secs(2 * 60 * 60);
-
 #[derive(Clone)]
 pub struct Worker {
     _id: usize,
@@ -122,6 +114,11 @@ async fn watch_for_import(
     transfer: Transfer,
 ) -> Result<()> {
     info!("{}: watching imports", transfer);
+    // Give up watching after this long so a transfer that never fully imports
+    // (e.g. one containing a sample the *arr won't import) can't loop forever
+    // and accumulate until downloads stall (see issue #30). Genuine imports are
+    // detected within a poll or two, so the default is generous.
+    let import_timeout = Duration::from_secs(app_data.config.import_timeout_secs);
     let started = Instant::now();
     loop {
         if transfer.is_imported().await {
@@ -147,12 +144,12 @@ async fn watch_for_import(
             info!("{}: removed", transfer);
             break;
         }
-        if started.elapsed() > MAX_IMPORT_WAIT {
+        if app_data.config.import_timeout_secs > 0 && started.elapsed() > import_timeout {
             warn!(
                 "{}: still not imported after {:?}; giving up watching. It likely contains a \
                  file the *arr won't import (e.g. a sample outside a skip_directories folder), \
                  so its local/put.io copies won't be cleaned up automatically.",
-                transfer, MAX_IMPORT_WAIT
+                transfer, import_timeout
             );
             break;
         }
