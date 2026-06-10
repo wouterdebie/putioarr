@@ -7,7 +7,7 @@ use crate::{
     AppData,
 };
 use actix_web::web::Data;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use async_channel::Sender;
 use async_recursion::async_recursion;
 use colored::*;
@@ -88,27 +88,22 @@ impl Transfer {
     }
 
     pub async fn get_download_targets(&self) -> Result<Vec<DownloadTarget>> {
-        info!("{}: generating targets", self);
-        let default = "0000".to_string();
-        let hash = self.hash.as_ref().unwrap_or(&default).as_str();
-        recurse_download_targets(&self.app_data, self.file_id.unwrap(), hash, None, true).await
+        self.generate_targets(None).await
     }
 
     /// Like [`get_download_targets`] but with an explicit base directory instead
     /// of looking one up from stored transfer state. Used for orphaned files,
     /// which have no persisted state to route them (issue #34).
     pub async fn get_download_targets_in(&self, base_path: &str) -> Result<Vec<DownloadTarget>> {
+        self.generate_targets(Some(base_path.to_string())).await
+    }
+
+    async fn generate_targets(&self, base_path: Option<String>) -> Result<Vec<DownloadTarget>> {
         info!("{}: generating targets", self);
+        let file_id = self.file_id.context("transfer has no file_id")?;
         let default = "0000".to_string();
         let hash = self.hash.as_ref().unwrap_or(&default).as_str();
-        recurse_download_targets(
-            &self.app_data,
-            self.file_id.unwrap(),
-            hash,
-            Some(base_path.to_string()),
-            true,
-        )
-        .await
+        recurse_download_targets(&self.app_data, file_id, hash, base_path, true).await
     }
 
     pub fn get_top_level(&self) -> DownloadTarget {
@@ -308,8 +303,9 @@ pub async fn produce_transfers(app_data: Data<AppData>, tx: Sender<TransferMessa
     let putio_check_interval = Duration::from_secs(app_data.config.polling_interval);
     let mut seen = Vec::<u64>::new();
     // Watch-folder scans hit put.io once per folder, so run them on their own
-    // interval rather than every poll to avoid extra API traffic (issue #34).
-    const ORPHAN_SCAN_INTERVAL: Duration = Duration::from_secs(60);
+    // configurable interval rather than every poll to avoid extra API traffic
+    // (issue #34).
+    let orphan_scan_interval = Duration::from_secs(app_data.config.watch_folder_interval_secs);
     let mut last_orphan_scan: Option<Instant> = None;
 
     info!("Checking unfinished transfers");
@@ -386,7 +382,7 @@ pub async fn produce_transfers(app_data: Data<AppData>, tx: Sender<TransferMessa
             // Pull orphaned files from the configured watch folders (completed
             // files whose transfer record no longer exists — see issue #34),
             // throttled so it doesn't list every folder on every poll.
-            if last_orphan_scan.map_or(true, |t| t.elapsed() >= ORPHAN_SCAN_INTERVAL) {
+            if last_orphan_scan.map_or(true, |t| t.elapsed() >= orphan_scan_interval) {
                 scan_watch_folders(&app_data, &tx, &list_transfer_response.transfers).await;
                 last_orphan_scan = Some(Instant::now());
             }

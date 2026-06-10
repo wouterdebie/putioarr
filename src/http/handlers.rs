@@ -286,16 +286,25 @@ pub(crate) async fn handle_torrent_get(
             Err(_) => continue,
         };
         let complete = app_data.state.is_local_complete(id).await;
-        // Keep size/left consistent: never report left_until_done > total_size
-        // (size can be 0 if put.io omitted it).
+        // Report consistent size/progress. Keep left_until_done <= total_size,
+        // and when incomplete report a non-zero amount remaining even if the
+        // size is unknown (put.io omitted it) so a client can't read 0/0 as
+        // "done" while it's still downloading.
         let size = orphan.size.max(0);
+        let (total_size, left_until_done) = if complete {
+            (size, 0)
+        } else if size > 0 {
+            (size, size)
+        } else {
+            (1, 1)
+        };
         transmission_transfers.push(TransmissionTorrent {
             id,
             hash_string: Some(orphan.hash),
             name: orphan.name,
             download_dir: orphan.download_dir,
-            total_size: size,
-            left_until_done: if complete { 0 } else { size },
+            total_size,
+            left_until_done,
             is_finished: complete,
             eta: 0,
             status: if complete {

@@ -43,6 +43,10 @@ struct RunArgs {
     pub config_path: String,
 }
 
+fn default_watch_folder_interval_secs() -> u64 {
+    60
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Config {
     bind_address: String,
@@ -72,6 +76,13 @@ pub struct Config {
     /// like a normal download (see issue #34). Empty (default) disables this.
     #[serde(default)]
     watch_folders: Vec<i64>,
+    /// How often, in seconds, to scan `watch_folders` for orphaned files.
+    /// Defaults to 60. Each scan lists every configured folder on put.io, so
+    /// raise this if you have many folders and want to keep API traffic low;
+    /// it's independent of `polling_interval`. Only used when `watch_folders`
+    /// is non-empty.
+    #[serde(default = "default_watch_folder_interval_secs")]
+    watch_folder_interval_secs: u64,
     putio: PutioConfig,
     sonarr: Option<ArrConfig>,
     radarr: Option<ArrConfig>,
