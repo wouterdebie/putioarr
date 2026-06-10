@@ -129,7 +129,16 @@ async fn fetch_attempt(
     if existing > 0 {
         req = req.header(reqwest::header::RANGE, format!("bytes={}-", existing));
     }
-    let response = req.send().await?;
+    // Bound the request itself, not just the connect. put.io can accept the
+    // connection and then stall before sending response headers; without this
+    // timeout `send()` blocks forever, parking the download worker (and, via the
+    // blocked done channel, every orchestration worker) until the whole process
+    // stops pulling. On timeout we error so the retry loop can resume (issue #32).
+    let response =
+        match tokio::time::timeout(std::time::Duration::from_secs(60), req.send()).await {
+            Ok(r) => r?,
+            Err(_) => bail!("timed out waiting for response headers from put.io"),
+        };
     let status = response.status();
     if !(status.is_success() || status == reqwest::StatusCode::PARTIAL_CONTENT) {
         bail!("HTTP {}", status);
