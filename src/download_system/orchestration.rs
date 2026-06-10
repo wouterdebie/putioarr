@@ -75,6 +75,12 @@ impl Worker {
     async fn handle_queued(&self, t: Transfer) -> Result<()> {
         info!("{}: download {}", t, "started".yellow());
         let targets = t.get_download_targets().await?;
+        // No targets means nothing to download; don't let the `all(...)` check
+        // below pass vacuously and mark the transfer complete.
+        if targets.is_empty() {
+            warn!("{}: no downloadable targets, skipping", t);
+            return Ok(());
+        }
         // A status channel per target for the download workers to report back.
         let done_channels: Vec<(Sender<DownloadDoneStatus>, Receiver<DownloadDoneStatus>)> =
             targets.iter().map(|_| async_channel::unbounded()).collect();

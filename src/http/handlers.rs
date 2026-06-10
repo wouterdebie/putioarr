@@ -280,13 +280,16 @@ pub(crate) async fn handle_torrent_get(
     // putioarr has pulled them locally (issue #34).
     for orphan in app_data.state.orphans().await {
         let complete = app_data.state.is_local_complete(orphan.file_id as u64).await;
+        // Keep size/left consistent: never report left_until_done > total_size
+        // (size can be 0 if put.io omitted it).
+        let size = orphan.size.max(0);
         transmission_transfers.push(TransmissionTorrent {
             id: orphan.file_id as u64,
             hash_string: Some(orphan.hash),
             name: orphan.name,
             download_dir: orphan.download_dir,
-            total_size: orphan.size,
-            left_until_done: if complete { 0 } else { std::cmp::max(orphan.size, 1) },
+            total_size: size,
+            left_until_done: if complete { 0 } else { size },
             is_finished: complete,
             eta: 0,
             status: if complete {
@@ -296,7 +299,7 @@ pub(crate) async fn handle_torrent_get(
             },
             seconds_downloading: 0,
             error_string: None,
-            downloaded_ever: if complete { orphan.size } else { 0 },
+            downloaded_ever: if complete { size } else { 0 },
             seed_ratio_limit: 0.0,
             seed_ratio_mode: 0,
             seed_idle_limit: 0,

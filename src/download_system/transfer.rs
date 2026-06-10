@@ -13,7 +13,7 @@ use async_recursion::async_recursion;
 use colored::*;
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
-use std::{fmt::Display, path::Path};
+use std::{collections::HashSet, fmt::Display, path::Path};
 use tokio::time::sleep;
 
 #[derive(Clone)]
@@ -121,7 +121,7 @@ impl Transfer {
             name,
             file_id: Some(file_id),
             targets: None,
-            hash: Some(format!("{:040x}", file_id)),
+            hash: Some(format!("{:040x}", file_id as u64)),
             app_data,
             is_orphan: true,
         }
@@ -283,7 +283,7 @@ pub async fn produce_transfers(app_data: Data<AppData>, tx: Sender<TransferMessa
     let mut seen = Vec::<u64>::new();
     // file_ids of orphaned watch-folder files we've already queued, so the scan
     // doesn't re-queue them every poll.
-    let mut orphan_seen = Vec::<i64>::new();
+    let mut orphan_seen = HashSet::<i64>::new();
 
     info!("Checking unfinished transfers");
     // We only need to check if something has been imported. Just by looking at the filesystem we
@@ -416,14 +416,14 @@ fn looks_like_episode(name: &str) -> bool {
 async fn scan_watch_folders(
     app_data: &Data<AppData>,
     tx: &Sender<TransferMessage>,
-    orphan_seen: &mut Vec<i64>,
+    orphan_seen: &mut HashSet<i64>,
     active_transfers: &[PutIOTransfer],
 ) {
     if app_data.config.watch_folders.is_empty() {
         return;
     }
     let api_key = &app_data.config.putio.api_key;
-    let active_file_ids: Vec<i64> = active_transfers.iter().filter_map(|t| t.file_id).collect();
+    let active_file_ids: HashSet<i64> = active_transfers.iter().filter_map(|t| t.file_id).collect();
 
     for folder_id in &app_data.config.watch_folders {
         let resp = match putio::list_files(api_key, *folder_id).await {
@@ -458,7 +458,7 @@ async fn scan_watch_folders(
                 Some(c) => format!("{}/{}", app_data.config.download_directory, c),
                 None => app_data.config.download_directory.clone(),
             };
-            let hash = format!("{:040x}", file.id);
+            let hash = format!("{:040x}", file.id as u64);
             if let Err(e) = app_data
                 .state
                 .add_transfer(
@@ -468,7 +468,10 @@ async fn scan_watch_folders(
                 )
                 .await
             {
-                warn!("watch folder {}: storing state failed: {}", file.id, e);
+                warn!(
+                    "watch folder {}: storing state for file {} failed: {}",
+                    folder_id, file.id, e
+                );
             }
 
             let mut transfer = Transfer::from_orphan(app_data.clone(), file.id, file.name.clone());
@@ -476,7 +479,7 @@ async fn scan_watch_folders(
                 Ok(t) if !t.is_empty() => t,
                 Ok(_) => {
                     // No downloadable (video) content — ignore it.
-                    orphan_seen.push(file.id);
+                    orphan_seen.insert(file.id);
                     continue;
                 }
                 Err(e) => {
@@ -490,27 +493,30 @@ async fn scan_watch_folders(
                 // Already imported by the *arr — just clean it off put.io.
                 info!("{}: orphan already imported, deleting from put.io", transfer);
                 let _ = putio::delete_file(api_key, file.id).await;
-                orphan_seen.push(file.id);
+                orphan_seen.insert(file.id);
                 continue;
             }
 
-            app_data
-                .state
-                .add_orphan(OrphanFile {
-                    file_id: file.id,
-                    name: file.name.clone(),
-                    hash,
-                    size: file.size,
-                    download_dir,
-                })
-                .await;
             info!("{}: orphan ready for download", transfer);
+            // Only start tracking/reporting the orphan once it's actually been
+            // queued, so a failed send can't leave it advertised via torrent-get
+            // as a download that never happens.
             if tx
                 .send(TransferMessage::QueuedForDownload(transfer))
                 .await
                 .is_ok()
             {
-                orphan_seen.push(file.id);
+                app_data
+                    .state
+                    .add_orphan(OrphanFile {
+                        file_id: file.id,
+                        name: file.name.clone(),
+                        hash,
+                        size: file.size,
+                        download_dir,
+                    })
+                    .await;
+                orphan_seen.insert(file.id);
             }
         }
     }
