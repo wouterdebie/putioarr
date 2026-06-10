@@ -13,7 +13,12 @@ use async_recursion::async_recursion;
 use colored::*;
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, fmt::Display, path::Path};
+use std::{
+    collections::HashSet,
+    fmt::Display,
+    path::Path,
+    time::{Duration, Instant},
+};
 use tokio::time::sleep;
 
 #[derive(Clone)]
@@ -133,6 +138,10 @@ impl Transfer {
     /// no put.io transfer record). The file_id doubles as the transfer id and is
     /// formatted into a deterministic synthetic hash so the *arr can track it.
     pub fn from_orphan(app_data: Data<AppData>, file_id: i64, name: String) -> Self {
+        // put.io file ids are non-negative; the watch-folder scan filters out
+        // any that aren't before constructing an orphan, so the `as u64` casts
+        // below are exact. Assert it to catch future misuse.
+        debug_assert!(file_id >= 0, "orphan file_id must be non-negative");
         Self {
             transfer_id: file_id as u64,
             name,
@@ -296,8 +305,12 @@ async fn is_managed(app_data: &Data<AppData>, putio_transfer: &PutIOTransfer) ->
 }
 
 pub async fn produce_transfers(app_data: Data<AppData>, tx: Sender<TransferMessage>) -> Result<()> {
-    let putio_check_interval = std::time::Duration::from_secs(app_data.config.polling_interval);
+    let putio_check_interval = Duration::from_secs(app_data.config.polling_interval);
     let mut seen = Vec::<u64>::new();
+    // Watch-folder scans hit put.io once per folder, so run them on their own
+    // interval rather than every poll to avoid extra API traffic (issue #34).
+    const ORPHAN_SCAN_INTERVAL: Duration = Duration::from_secs(60);
+    let mut last_orphan_scan: Option<Instant> = None;
 
     info!("Checking unfinished transfers");
     // We only need to check if something has been imported. Just by looking at the filesystem we
@@ -371,8 +384,12 @@ pub async fn produce_transfers(app_data: Data<AppData>, tx: Sender<TransferMessa
             seen.retain(|t| active_ids.contains(t));
 
             // Pull orphaned files from the configured watch folders (completed
-            // files whose transfer record no longer exists — see issue #34).
-            scan_watch_folders(&app_data, &tx, &list_transfer_response.transfers).await;
+            // files whose transfer record no longer exists — see issue #34),
+            // throttled so it doesn't list every folder on every poll.
+            if last_orphan_scan.map_or(true, |t| t.elapsed() >= ORPHAN_SCAN_INTERVAL) {
+                scan_watch_folders(&app_data, &tx, &list_transfer_response.transfers).await;
+                last_orphan_scan = Some(Instant::now());
+            }
 
             // Log status when 60 seconds have passed since last time
             if start.elapsed().as_secs() >= 60 {
@@ -491,7 +508,12 @@ async fn scan_watch_folders(
             if transfer.is_imported().await {
                 // Already imported by the *arr — just clean it off put.io.
                 info!("{}: orphan already imported, deleting from put.io", transfer);
-                let _ = putio::delete_file(api_key, file.id).await;
+                if let Err(e) = putio::delete_file(api_key, file.id).await {
+                    warn!(
+                        "{}: failed to delete imported orphan from put.io: {}",
+                        transfer, e
+                    );
+                }
                 continue;
             }
 

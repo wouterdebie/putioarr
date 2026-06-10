@@ -74,7 +74,15 @@ impl Worker {
     /// caller can log it without ending the worker (see issue #34).
     async fn handle_queued(&self, t: Transfer) -> Result<()> {
         info!("{}: download {}", t, "started".yellow());
-        let targets = t.get_download_targets().await?;
+        // Reuse targets computed when the transfer was discovered if present —
+        // watch-folder orphans precompute them with the correct base dir
+        // (get_download_targets_in), which a plain get_download_targets() here
+        // would not reproduce (no persisted state) and would mis-route. Only
+        // regenerate for normal transfers, which don't carry them.
+        let targets = match t.targets.clone() {
+            Some(ts) => ts,
+            None => t.get_download_targets().await?,
+        };
         // No targets means nothing to download; don't let the `all(...)` check
         // below pass vacuously and mark the transfer complete.
         if targets.is_empty() {

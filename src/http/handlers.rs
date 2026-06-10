@@ -290,7 +290,7 @@ pub(crate) async fn handle_torrent_get(
         // (size can be 0 if put.io omitted it).
         let size = orphan.size.max(0);
         transmission_transfers.push(TransmissionTorrent {
-            id: orphan.file_id as u64,
+            id,
             hash_string: Some(orphan.hash),
             name: orphan.name,
             download_dir: orphan.download_dir,
