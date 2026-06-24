@@ -54,7 +54,18 @@ impl Transfer {
                 let service_result = match app.check_imported(&target.to).await {
                     Ok(r) => r,
                     Err(e) => {
-                        error!("Error retrieving history from {}: {}", app, e);
+                        // A misconfigured/unreachable *arr fails for every
+                        // transfer on every poll; throttle the log so it doesn't
+                        // fill the disk over time (issue #21). Key on the app's
+                        // existing name (no allocation on the suppressed path).
+                        if self.app_data.state.should_log_arr_error(&app.name).await {
+                            error!(
+                                "Error retrieving history from {} (suppressing repeats for {:?}): {}",
+                                app,
+                                crate::state::StateManager::ARR_ERROR_LOG_INTERVAL,
+                                e
+                            );
+                        }
                         false
                     }
                 };

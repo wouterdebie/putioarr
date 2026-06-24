@@ -42,6 +42,10 @@ pub struct StateManager {
     /// 404); without this, every torrent-get would re-hit the API and re-log a
     /// warning. Retries are suppressed until [`Self::NAME_FAILURE_TTL`] passes.
     failed_names: Arc<RwLock<HashMap<i64, Instant>>>,
+    /// Last time a connection error was logged for each *arr, used to throttle
+    /// the log. A misconfigured Sonarr/Radarr fails on every poll for every
+    /// transfer, and logging each one filled users' disks over time (issue #21).
+    arr_error_logged: Arc<RwLock<HashMap<String, Instant>>>,
 }
 
 impl StateManager {
@@ -52,6 +56,26 @@ impl StateManager {
             local_complete: Arc::new(RwLock::new(HashSet::new())),
             file_names: Arc::new(RwLock::new(HashMap::new())),
             failed_names: Arc::new(RwLock::new(HashMap::new())),
+            arr_error_logged: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    /// Minimum time between logging the same *arr's connection error.
+    pub const ARR_ERROR_LOG_INTERVAL: Duration = Duration::from_secs(300);
+
+    /// Returns true if an error for `app` should be logged now, throttling
+    /// repeats to at most one per [`Self::ARR_ERROR_LOG_INTERVAL`]. Keeps a
+    /// persistently unreachable/misconfigured *arr from filling the disk with
+    /// identical error lines on every poll (issue #21).
+    pub async fn should_log_arr_error(&self, app: &str) -> bool {
+        let mut map = self.arr_error_logged.write().await;
+        let now = Instant::now();
+        match map.get(app) {
+            Some(at) if now.saturating_duration_since(*at) < Self::ARR_ERROR_LOG_INTERVAL => false,
+            _ => {
+                map.insert(app.to_string(), now);
+                true
+            }
         }
     }
 
