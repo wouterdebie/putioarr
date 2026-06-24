@@ -11,7 +11,10 @@ use anyhow::Result;
 use async_channel::{Receiver, Sender};
 use colored::*;
 use log::{info, warn};
-use std::{fs, time::Duration};
+use std::{
+    fs,
+    time::{Duration, Instant},
+};
 use tokio::{fs::metadata, time::sleep};
 
 use super::transfer::TransferMessage;
@@ -111,6 +114,12 @@ async fn watch_for_import(
     transfer: Transfer,
 ) -> Result<()> {
     info!("{}: watching imports", transfer);
+    // Give up watching after this long so a transfer that never fully imports
+    // (e.g. one containing a sample the *arr won't import) can't loop forever
+    // and accumulate until downloads stall (see issue #30). Genuine imports are
+    // detected within a poll or two, so the default is generous.
+    let import_timeout = Duration::from_secs(app_data.config.import_timeout_secs);
+    let started = Instant::now();
     loop {
         if transfer.is_imported().await {
             info!("{}: imported", transfer);
@@ -132,11 +141,20 @@ async fn watch_for_import(
             let m = transfer.clone();
             tx.send(TransferMessage::Imported(m)).await?;
 
+            info!("{}: removed", transfer);
+            break;
+        }
+        if app_data.config.import_timeout_secs > 0 && started.elapsed() > import_timeout {
+            warn!(
+                "{}: still not imported after {:?}; giving up watching. It likely contains a \
+                 file the *arr won't import (e.g. a sample outside a skip_directories folder), \
+                 so its local/put.io copies won't be cleaned up automatically.",
+                transfer, import_timeout
+            );
             break;
         }
         sleep(Duration::from_secs(app_data.config.polling_interval)).await;
     }
-    info!("{}: removed", transfer);
     Ok(())
 }
 

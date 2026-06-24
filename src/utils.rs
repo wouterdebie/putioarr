@@ -29,6 +29,12 @@ uid = 1000
 # Optional polling interval in secs, default 10.
 polling_interval = 10
 
+# Optional. Give up watching a transfer for import after this many seconds, default 7200 (2h).
+# Bounds the per-transfer import-watch loop so a transfer that never fully imports (e.g. one
+# containing a sample the *arr won't import) can't accumulate and eventually stall downloads.
+# Set to 0 to disable (watch indefinitely).
+import_timeout_secs = 7200
+
 # Optional skip directories when downloading, default ["sample", "extras"]
 skip_directories = ["sample", "extras"]
 
