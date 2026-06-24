@@ -8,7 +8,17 @@ use file_owner::PathExt;
 use futures::StreamExt;
 use log::{error, info, warn};
 use nix::unistd::Uid;
+use std::time::Duration;
 use std::{fs, path::Path};
+
+/// How long to wait for a download request to start returning a response (the
+/// connect + response-headers phase). Bounds it so a server that accepts the
+/// connection but then stalls can't hang the worker; the retry loop resumes.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// How long to wait for the next chunk of a download stream before treating it
+/// as stalled (and erroring so the retry loop resumes).
+const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Clone)]
 pub struct Worker {
@@ -129,7 +139,20 @@ async fn fetch_attempt(
     if existing > 0 {
         req = req.header(reqwest::header::RANGE, format!("bytes={}-", existing));
     }
-    let response = req.send().await?;
+    // Bound the request itself, not just the connect. put.io can accept the
+    // connection and then stall before sending response headers; without this
+    // timeout `send()` blocks forever, parking the download worker (and, via the
+    // blocked done channel, every orchestration worker) until the whole process
+    // stops pulling. On timeout we error so the retry loop can resume (issue #32).
+    let response =
+        match tokio::time::timeout(REQUEST_TIMEOUT, req.send()).await {
+            Ok(r) => r?,
+            Err(_) => bail!(
+                "timed out after {:?} waiting for response headers from {}",
+                REQUEST_TIMEOUT,
+                target.from.as_deref().unwrap_or("<no url>")
+            ),
+        };
     let status = response.status();
     if !(status.is_success() || status == reqwest::StatusCode::PARTIAL_CONTENT) {
         bail!("HTTP {}", status);
@@ -146,12 +169,12 @@ async fn fetch_attempt(
 
     let mut byte_stream = response.bytes_stream();
     loop {
-        match tokio::time::timeout(std::time::Duration::from_secs(60), byte_stream.next()).await {
+        match tokio::time::timeout(STREAM_IDLE_TIMEOUT, byte_stream.next()).await {
             Ok(Some(item)) => {
                 tokio::io::copy(&mut item?.as_ref(), &mut tmp_file).await?;
             }
             Ok(None) => break,
-            Err(_) => bail!("stalled: no data received for 60s"),
+            Err(_) => bail!("stalled: no data received for {:?}", STREAM_IDLE_TIMEOUT),
         }
     }
     Ok(())
