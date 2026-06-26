@@ -18,6 +18,18 @@ pub struct TransferState {
     pub download_dir: String,
 }
 
+/// A completed file found in a `watch_folders` folder that has no transfer
+/// record (e.g. put.io cleared the transfer but left the file). It's reported
+/// to the *arr like a normal download so it can still be imported (issue #34).
+#[derive(Debug, Clone)]
+pub struct OrphanFile {
+    pub file_id: i64,
+    pub name: String,
+    pub hash: String,
+    pub size: i64,
+    pub download_dir: String,
+}
+
 /// Tracks the category/download-dir chosen for each transfer.
 ///
 /// Reads are served from an in-memory cache for speed, while mutations are
@@ -42,6 +54,10 @@ pub struct StateManager {
     /// 404); without this, every torrent-get would re-hit the API and re-log a
     /// warning. Retries are suppressed until [`Self::NAME_FAILURE_TTL`] passes.
     failed_names: Arc<RwLock<HashMap<i64, Instant>>>,
+    /// Orphaned watch-folder files (no transfer record) currently being pulled,
+    /// keyed by file_id. Reported to the *arr via torrent-get so they import
+    /// like normal downloads (issue #34).
+    orphans: Arc<RwLock<HashMap<i64, OrphanFile>>>,
     /// Last time a connection error was logged for each *arr, used to throttle
     /// the log. A misconfigured Sonarr/Radarr fails on every poll for every
     /// transfer, and logging each one filled users' disks over time (issue #21).
@@ -56,6 +72,7 @@ impl StateManager {
             local_complete: Arc::new(RwLock::new(HashSet::new())),
             file_names: Arc::new(RwLock::new(HashMap::new())),
             failed_names: Arc::new(RwLock::new(HashMap::new())),
+            orphans: Arc::new(RwLock::new(HashMap::new())),
             arr_error_logged: Arc::new(RwLock::new(HashMap::new())),
         }
     }
@@ -77,6 +94,26 @@ impl StateManager {
                 true
             }
         }
+    }
+
+    /// Records an orphaned watch-folder file that is being pulled.
+    pub async fn add_orphan(&self, orphan: OrphanFile) {
+        self.orphans.write().await.insert(orphan.file_id, orphan);
+    }
+
+    /// True if `file_id` is already tracked as an orphan being pulled.
+    pub async fn has_orphan(&self, file_id: i64) -> bool {
+        self.orphans.read().await.contains_key(&file_id)
+    }
+
+    /// Stops tracking an orphan (e.g. once it has been imported and removed).
+    pub async fn remove_orphan(&self, file_id: i64) {
+        self.orphans.write().await.remove(&file_id);
+    }
+
+    /// All orphaned files currently being pulled, for reporting to the *arr.
+    pub async fn orphans(&self) -> Vec<OrphanFile> {
+        self.orphans.read().await.values().cloned().collect()
     }
 
     /// How long to suppress retrying a failed file-name lookup.

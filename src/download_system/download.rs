@@ -47,7 +47,12 @@ impl Worker {
                 Ok(_) => DownloadDoneStatus::Success,
                 Err(_) => DownloadDoneStatus::Failed,
             };
-            dtm.tx.send(done_status).await?;
+            // Reporting status can fail if the orchestration worker that queued
+            // this target is gone. Don't let that take this worker down too —
+            // log and keep serving other downloads (issue #34).
+            if let Err(e) = dtm.tx.send(done_status).await {
+                warn!("download worker: could not report status (receiver gone): {e}");
+            }
         }
     }
 }

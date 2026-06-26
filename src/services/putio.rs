@@ -203,6 +203,8 @@ pub struct FileResponse {
     pub id: i64,
     pub name: String,
     pub file_type: String,
+    #[serde(default)]
+    pub size: i64,
 }
 
 pub async fn list_files(api_token: &str, file_id: i64) -> Result<ListFileResponse> {
@@ -212,6 +214,7 @@ pub async fn list_files(api_token: &str, file_id: i64) -> Result<ListFileRespons
             "https://api.put.io/v2/files/list?parent_id={}",
             file_id
         ))
+        .timeout(Duration::from_secs(30))
         .header("authorization", format!("Bearer {}", api_token))
         .timeout(Duration::from_secs(30))
         .send()
@@ -237,6 +240,7 @@ pub async fn url(api_token: &str, file_id: i64) -> Result<String> {
     let client = http_client();
     let response = client
         .get(format!("https://api.put.io/v2/files/{}/url", file_id))
+        .timeout(Duration::from_secs(30))
         .header("authorization", format!("Bearer {}", api_token))
         .timeout(Duration::from_secs(30))
         .send()

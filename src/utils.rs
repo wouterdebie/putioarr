@@ -44,6 +44,18 @@ skip_directories = ["sample", "extras"]
 # transfers. Set to true to download every transfer on the account.
 download_unmanaged = false
 
+# Optional. put.io folder ids to scan for *orphaned* completed files: files that
+# were downloaded but whose transfer record no longer exists (e.g. put.io's
+# "clear completed transfers" removes the transfer but leaves the file). Such
+# files are never surfaced by transfers/list, so they'd otherwise be stranded.
+# Any video file here with no active transfer that isn't already imported is
+# pulled like a normal download. Empty (default) disables this.
+# watch_folders = [123456789]
+
+# Optional. How often (seconds) to scan watch_folders, default 60. Each scan
+# lists every configured folder on put.io; raise it to reduce API traffic.
+# watch_folder_interval_secs = 60
+
 # Optional number of orchestration workers, default 10. Unless there are many changes coming from
 # put.io, you shouldn't have to touch this number. 10 is already overkill.
 orchestration_workers = 10
