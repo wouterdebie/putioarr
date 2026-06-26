@@ -1,66 +1,228 @@
-# 0.6.6
-Merge pull request #26 from bugrax/main
+# 0.6.7
+Fix clippy lint
 
-Skip unmanaged transfers, complete only after local download, and make downloads resilient (fixes #9, #16)
-Create the destination directory before downloading
+Fix default_import_timeout_secs
 
-A File target can be handled before its sibling Directory target, and
-external cleanup can remove an emptied folder, leaving fetch() to fail
-with No such file or directory — which the resume/retry loop would then
-spin on. Ensure the parent directory exists before writing.
+Merge pull request #35 from bugrax/scan-download-folder-for-orphans
 
-Resume interrupted downloads instead of restarting
+Fix worker-death stalls and pull orphaned files from a watch folder (fixes #34)
+Merge branch 'main' into scan-download-folder-for-orphans
+Merge pull request #33 from bugrax/timeout-on-send
 
-A large download that stalls mid-stream was restarted from zero on the
-next attempt, so on a flaky put.io connection big files could loop
-forever and never finish. put.io serves Range requests (206 Partial
-Content), so retry the download and resume from the bytes already on
-disk via a Range header, appending to the partial file until complete.
+Add missing timeouts to put.io requests that can hang and stall all downloads (fixes #32)
+Merge pull request #31 from bugrax/bound-watch-for-import
 
-Only report a transfer complete after local download finishes (#16)
+Bound watch_for_import so stuck transfers can't stall downloads (fixes #30)
+Merge pull request #29 from bugrax/throttle-arr-error-logs
 
-put.io marks a transfer complete as soon as its own cloud download
-finishes, but the files don't exist on local disk until putioarr has
-pulled them down. Reporting completion to Sonarr/Radarr at that point
-makes them try to import files that aren't there yet, leaving the queue
-stuck on 'No files found eligible for import'.
+Throttle repeated *arr history-error logs (fixes #21)
+Address review round 5: list timeouts, interval clamp, hash dedup
 
-Track which transfers have finished downloading locally (StateManager
-local_complete set, marked when orchestration emits Downloaded) and, in
-the Transmission torrent-get response, keep a transfer in a downloading
-state until its local download is done — even if put.io already reports
-it complete/seeding.
+- add request timeouts to putio::list_files and putio::url so a hung
+  connection during a watch-folder scan can't stall transfer production
+- clamp watch_folder_interval_secs to >= 1s so a misconfigured 0 doesn't
+  become a zero Duration that scans every poll
+- derive OrphanFile.hash from the transfer's hash instead of formatting
+  file_id a second time (single source of truth)
+- clone only the Sender, not the unused Receiver, per done channel
 
-Fix typo in config template comment (downloding -> downloading)
+Address review round 4: orphan progress, fallible targets, config interval
 
-Reuse a shared reqwest client across downloads
+- torrent-get: report a non-zero remaining amount for an incomplete orphan
+  even when put.io omitted its size, so 0/0 isn't read as complete
+- get_download_targets[_in]: return an error instead of panicking when a
+  transfer has no file_id (shared generate_targets helper)
+- make the watch-folder scan interval configurable via
+  watch_folder_interval_secs (default 60), documented in the template
 
-Build the HTTP client once and store it in AppData instead of
-constructing a new reqwest::Client for every fetch, so connections are
-pooled across downloads. The per-chunk inactivity timeout added earlier
-already bounds post-connect stalls.
+Address review round 3: orphan routing, id reuse, scan throttle, logs
 
-Add stall timeout to download stream
+- handle_queued reuses precomputed t.targets when present so watch-folder
+  orphans download to their intended category dir (get_download_targets_in)
+  instead of being mis-routed by a stateless get_download_targets()
+- torrent-get uses the already-validated u64 id for the struct field too
+- throttle watch-folder scans to a 60s interval instead of every poll
+- log (not swallow) delete_file failures in the already-imported path
+- debug_assert the non-negative file_id invariant in from_orphan
 
-The connect timeout added earlier only covers establishing the
-connection. If put.io stops sending data mid-download, the worker would
-hang forever in the byte-stream loop, eventually stalling every download
-worker and halting all transfers.
+Address review round 2: orphan tracking, retry, routing, alloc
 
-Wrap each chunk read in a 60s timeout so a stalled download fails and
-the worker moves on instead of hanging.
+- Track in-progress orphans via state.has_orphan instead of an
+  ever-growing orphan_seen set; a failed orphan is dropped from it
+  (orchestration) so a later scan retries it
+- Route orphans with an explicit base dir (get_download_targets_in)
+  instead of persisting per-orphan TransferState that never got cleaned
+- Skip non-media / negative-id watch-folder entries up front
+- torrent-get: checked u64::try_from for the orphan id
+- looks_like_episode: case-insensitive 'season' check without allocating
 
-Fix: skip unmanaged transfers and add download timeout
+Address review: name the download timeouts and make messages generic
 
-Resolves hang when the put.io account contains transfers not added by
-putioarr (e.g. a manually-maintained Watch List). Previously every
-downloadable transfer was queued, and the orchestration worker would
-block forever on a stalled/seeding transfer because the download used
-reqwest::get with no timeout (upstream issue #9).
+Extract the request and stream-idle timeouts into REQUEST_TIMEOUT and
+STREAM_IDLE_TIMEOUT constants, and include the duration (and target url)
+in the timeout messages instead of a hard-coded host/duration.
 
-- Add is_managed(): only process transfers that have stored
-  category/download-dir state, unless the new download_unmanaged option
-  is enabled (default false).
-- Skip unmanaged transfers in both the resume and monitor loops.
-- fetch(): use a client with a 30s connect timeout and check the HTTP
-  status so a bad/stalled download fails fast instead of hanging.
+Address review: empty-targets guard, HashSet lookups, orphan reporting
+
+- handle_queued: skip transfers with no targets instead of vacuously
+  marking them complete
+- scan: O(1) HashSet membership for active_file_ids/orphan_seen
+- synthetic hash from u64 so it stays a clean 40-hex value
+- log the folder id (not the file id) on a state-save failure
+- only add_orphan after the queue send succeeds
+- torrent-get: keep orphan total_size/left_until_done consistent
+
+Clean up imported orphans from put.io directly in watch_for_import (#34)
+
+The Imported-message route to cleanup ran on an orchestration worker,
+which can be permanently busy in handle_queued while downloads are
+active, so orphan put.io deletes never fired. Do the delete in the
+watch_for_import task itself (which already deletes the local copy).
+
+Keep download workers alive on per-transfer errors (#34 root cause)
+
+WIP: scan watch folders for orphaned files (#34)
+
+Reuse one pooled HTTP client for put.io API calls
+
+Every put.io call built a fresh reqwest::Client, so connections were
+never reused. Resuming a large account generates targets for every
+transfer (list_files + url each), and the resulting client/socket churn
+exhausts file descriptors until requests hang with no progress and no
+error. Share a single connection-pooled client via OnceLock instead.
+
+Add request timeouts to put.io list_files/url/account_info
+
+These three put.io API calls were missing the .timeout() the other
+put.io calls already have. list_files and url are called from
+get_download_targets for every transfer; when put.io accepted the
+connection but stalled, they hung with no timeout, freezing the
+orchestration worker before any download even started — the real cause
+of the recurring download stall (the download send() timeout in the
+previous commit covers a later point in the same path).
+
+Enforce the import_timeout_secs default (7200) at the type level
+
+Use #[serde(default = ...)] returning 7200 instead of #[serde(default)],
+which would default to 0 (disabling the bound) if the field is missing
+from a config source without the Figment default layer.
+
+Time out the download request, not just the connect (fixes #32)
+
+fetch only set a connect_timeout and a per-chunk timeout around the byte
+stream. The req.send() call (connect + waiting for response headers) had
+no timeout of its own, so if put.io accepted the connection but stalled
+before sending headers, send() blocked forever. The download worker
+parked there, the orchestration worker blocked on its done channel, and
+once the few download workers were stuck the whole process stopped
+pulling (a restart only cleared it temporarily).
+
+Wrap req.send() in a 60s timeout; a stalled request now errors and the
+existing retry loop resumes it instead of hanging.
+
+Make the import-watch give-up timeout configurable
+
+The give-up timeout was a hard-coded 2h. The right value depends on
+library size, IO speed and *arr load, so expose it as import_timeout_secs
+(default 7200). Setting it to 0 disables the bound (watch indefinitely).
+
+Only log 'removed' when the transfer was actually cleaned up
+
+The unconditional 'removed' log fired on the give-up path too, even
+though the warning there says nothing was cleaned up. Move it into the
+imported branch so the log matches what happened.
+
+Bound watch_for_import so stuck transfers can't stall downloads (fixes #30)
+
+watch_for_import polled is_imported() in an unbounded loop that only
+exits once every video file is imported. A transfer containing a file
+the *arr never imports (typically a sample outside a skip_directories
+folder) makes is_imported() permanently false, so the task loops
+forever. These accumulate over time until the process stops picking up
+new transfers entirely (downloads stall; a restart clears it).
+
+Give up watching after MAX_IMPORT_WAIT (2h) with a warning, so a stuck
+transfer ends its task instead of polling the *arr/put.io APIs forever.
+Genuine imports complete within a poll or two, so the bound doesn't
+affect normal operation. A better long-term fix is improved import
+mapping (the skip_directories TODO), noted in the issue.
+
+Merge remote-tracking branch 'upstream/main' into throttle-arr-error-logs
+
+# Conflicts:
+#	src/state.rs
+
+Merge pull request #28 from bugrax/handle-waiting-status
+
+Handle put.io WAITING transfer status (fixes #12)
+Merge pull request #27 from bugrax/fix-transfer-name-mismatch
+
+Report the put.io file/folder name to the *arr, not the transfer name (fixes #20, #11)
+Derive the throttle interval in the log from the constant
+
+The log message hardcoded '5m' while the interval is defined by
+ARR_ERROR_LOG_INTERVAL; format the constant into the message so the two
+can't drift if the interval is changed.
+
+Use saturating_duration_since in the error-log throttle
+
+Instant::duration_since can panic if the stored instant is somehow later
+than now; saturating_duration_since returns zero instead, making the
+throttle robust regardless.
+
+Avoid allocating on the throttled error path
+
+Key the *arr error throttle on the app's existing name field instead of
+app.to_string(), so the suppressed (common) path does no allocation. The
+full Display form is still used in the log message itself.
+
+Throttle repeated *arr history-error logs (fixes #21)
+
+When a Sonarr/Radarr is misconfigured or unreachable, the history check
+fails for every transfer on every poll, and each failure logged an
+error. Over weeks this grew the log to many GB and filled users' disks.
+Throttle the error to at most once per 5 minutes per *arr, so the
+problem stays visible without runaway log growth.
+
+Handle put.io WAITING transfer status (fixes #12)
+
+put.io reports a WAITING status for transfers that are queued/waiting
+before download, which wasn't matched and fell through to the catch-all,
+logging "Status WAITING unknown. Treating as CheckWait." repeatedly.
+Map it explicitly to CheckWait (its existing effective behaviour) so it
+no longer spams the log as an unknown status.
+
+Negative-cache failed file-name lookups
+
+A file removed from put.io returns a persistent 404, and torrent-get
+would re-attempt the lookup and log a warning on every poll. Record the
+time of a failed lookup and suppress retries for a TTL (10 min), so
+persistent errors don't spam the log or hammer the API. The marker is
+cleared on a later success and pruned alongside the name cache.
+
+Bound the file-name cache to active transfers
+
+The file_id -> name cache had no eviction, so it would grow for the
+lifetime of the process as new transfers were seen. Prune it on each
+torrent-get to the file_ids currently present on the account (mirroring
+how produce_transfers prunes its seen list), keeping it bounded to the
+active transfer set.
+
+Share the api token via Arc instead of allocating per transfer
+
+Allocate the token once as Arc<str> and clone the Arc (a refcount bump)
+into each per-transfer task, rather than allocating a new String for
+every transfer in the list.
+
+Report the put.io file/folder name to the *arr, not the transfer name
+
+put.io's transfer name frequently differs from the name of the file or
+folder it produces — indexers often prefix the torrent name (e.g.
+"www.example.org - Movie") while the downloaded folder is just "Movie".
+putioarr downloads into the file/folder name but reported the transfer
+name to Sonarr/Radarr via the Transmission torrent. Since the *arr looks
+for the data at <download_dir>/<name>, it looked in the wrong place and
+failed every such import with "No files found eligible for import".
+
+Resolve the transfer's file_id to its actual put.io name and report that
+instead (cached per file_id to avoid an API call on every torrent-get).
