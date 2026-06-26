@@ -49,6 +49,12 @@ fn default_import_timeout_secs() -> u64 {
     7200
 }
 
+/// Default for [`Config::watch_folder_interval_secs`] (60s), enforced at the
+/// type level so the documented default holds even without the Figment default layer.
+fn default_watch_folder_interval_secs() -> u64 {
+    60
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Config {
     bind_address: String,
