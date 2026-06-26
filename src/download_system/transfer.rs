@@ -397,7 +397,7 @@ pub async fn produce_transfers(app_data: Data<AppData>, tx: Sender<TransferMessa
             // Pull orphaned files from the configured watch folders (completed
             // files whose transfer record no longer exists — see issue #34),
             // throttled so it doesn't list every folder on every poll.
-            if last_orphan_scan.map_or(true, |t| t.elapsed() >= orphan_scan_interval) {
+            if last_orphan_scan.is_none_or(|t| t.elapsed() >= orphan_scan_interval) {
                 scan_watch_folders(&app_data, &tx, &list_transfer_response.transfers).await;
                 last_orphan_scan = Some(Instant::now());
             }
