@@ -82,6 +82,14 @@ pub struct Config {
     /// lets the put.io account be shared with manual downloads.
     #[serde(default)]
     download_unmanaged: bool,
+    /// When true, keep the locally downloaded files in `download_directory`
+    /// after the *arr imports them, instead of deleting them. Off by default,
+    /// which preserves the normal behaviour of removing a download once its
+    /// import is confirmed. Useful when the *arr copies (rather than
+    /// hardlinks/moves) imports and you want to keep the original. Only affects
+    /// the local files; put.io transfers/files are still cleaned up as usual.
+    #[serde(default)]
+    keep_downloads: bool,
     /// put.io folder ids to additionally scan for *orphaned* completed files:
     /// files that were downloaded but whose transfer record no longer exists
     /// (e.g. put.io's "clear completed transfers" removes the transfer while
@@ -184,6 +192,7 @@ async fn main() -> Result<()> {
                 .join(Serialized::default("port", 9091))
                 .join(Serialized::default("uid", 1000))
                 .join(Serialized::default("download_unmanaged", false))
+                .join(Serialized::default("keep_downloads", false))
                 .join(Serialized::default(
                     "skip_directories",
                     vec!["sample", "extras"],

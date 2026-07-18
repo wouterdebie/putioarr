@@ -44,6 +44,11 @@ skip_directories = ["sample", "extras"]
 # transfers. Set to true to download every transfer on the account.
 download_unmanaged = false
 
+# Optional. When false (default), locally downloaded files are deleted after the
+# *arr imports them. Set to true to keep them in download_directory instead (put.io
+# transfers/files are still cleaned up as usual).
+keep_downloads = false
+
 # Optional. put.io folder ids to scan for *orphaned* completed files: files that
 # were downloaded but whose transfer record no longer exists (e.g. put.io's
 # "clear completed transfers" removes the transfer but leaves the file). Such

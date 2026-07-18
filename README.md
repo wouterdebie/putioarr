@@ -130,6 +130,11 @@ orchestration_workers = 10
 # Optional number of download workers, default 4. This controls how many downloads we run in parallel.
 download_workers = 4
 
+# Optional. When false (default), locally downloaded files are deleted after
+# sonarr/radarr/whisparr imports them. Set to true to keep them in
+# download_directory instead (put.io transfers/files are still cleaned up).
+keep_downloads = false
+
 [putio]
 # Required. Putio API key. You can generate one using `putioarr get-token`
 api_key =  "MYPUTIOKEY"
@@ -180,9 +185,6 @@ To prevent Sonarr/Radarr/Whisparr from seeing each other's downloads, you can co
 This feature ensures each *arr application only sees and processes its own downloads.
 
 ## TODO:
-- Better Error handling and retry behavior
-- The session ID provided is hard coded. Not sure if it matters.
-- (Add option to not delete downloads)
 - Figure out a better way to map a transfer to a completed import. Since a transfer can contain multiple files (e.g. a whole season) we currently check if all video files have been imported. Most of the time this is fine, except when there are sample videos. sonarr/radarr/whisparr will not import samples, but will make no mention of the fact that the sample was skipped. Right now we check against the `skip_directories` list, which works, but might be tedious.
 - Automatically pick the right putio proxy based on speed
 

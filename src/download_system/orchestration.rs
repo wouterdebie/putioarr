@@ -157,19 +157,26 @@ async fn watch_for_import(
             info!("{}: imported", transfer);
             let top_level_target = transfer.get_top_level();
 
-            match metadata(&top_level_target.to).await {
-                Ok(m) if m.is_dir() => {
-                    fs::remove_dir_all(&top_level_target.to).unwrap();
-                    info!("{}: deleted", &top_level_target);
-                }
-                Ok(m) if m.is_file() => {
-                    fs::remove_file(&top_level_target.to).unwrap();
-                    info!("{}: deleted", &top_level_target);
-                }
-                Ok(_) | Err(_) => {
-                    panic!("{}: no idea how to handle", &top_level_target)
-                }
-            };
+            // Remove the local copy now that it's imported, unless the user
+            // opted to keep downloads (e.g. the *arr copies imports and they
+            // want to keep the original).
+            if app_data.config.keep_downloads {
+                info!("{}: keeping local download (keep_downloads)", &top_level_target);
+            } else {
+                match metadata(&top_level_target.to).await {
+                    Ok(m) if m.is_dir() => {
+                        fs::remove_dir_all(&top_level_target.to).unwrap();
+                        info!("{}: deleted", &top_level_target);
+                    }
+                    Ok(m) if m.is_file() => {
+                        fs::remove_file(&top_level_target.to).unwrap();
+                        info!("{}: deleted", &top_level_target);
+                    }
+                    Ok(_) | Err(_) => {
+                        panic!("{}: no idea how to handle", &top_level_target)
+                    }
+                };
+            }
             // An orphan has no put.io transfer to remove or seed, so finish it
             // here directly instead of routing an Imported message through a
             // worker (which may be busy downloading and never pick it up),
