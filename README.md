@@ -181,7 +181,7 @@ This feature ensures each *arr application only sees and processes its own downl
 
 ## Connecting Sonarr/Radarr/Whisparr
 
-putioarr pretends to be a Transmission client, so you add it in the *arr just
+putioarr pretends to be a Transmission client, so you add it in the \*arr just
 like a real Transmission instance.
 
 In **Settings → Download Clients → Add → Transmission**, set:
@@ -193,42 +193,42 @@ In **Settings → Download Clients → Add → Transmission**, set:
 | URL Base | `/transmission` |
 | Username | the `username` from your config |
 | Password | the `password` from your config |
-| Category | the category for this *arr, if you set one (e.g. `tv` for Sonarr, `movies` for Radarr) — must match the `category` in putioarr's config |
+| Category | the category for this \*arr, if you set one (e.g. `tv` for Sonarr, `movies` for Radarr) — must match the `category` in putioarr's config |
 
 Click **Test**; it should turn green. Then **Save**.
 
-Repeat for each *arr, using that *arr's category.
+Repeat for each \*arr, using that \*arr's category.
 
-> **Important — shared download path.** The *arr imports a completed download by
+> **Important — shared download path.** The \*arr imports a completed download by
 > reading the files from disk itself, so it must be able to see the files
 > putioarr downloaded, **at the same path**. In other words
-> `download_directory` in putioarr and the path the *arr looks in must resolve
+> `download_directory` in putioarr and the path the \*arr looks in must resolve
 > to the same files. The easiest way is to mount the *same* host directory into
 > both containers at the same path (e.g. `/downloads` in putioarr and
 > `/downloads` in Sonarr/Radarr). If the paths differ, add a **Remote Path
-> Mapping** in the *arr (Settings → Download Clients → Remote Path Mappings) so
-> it can translate putioarr's path to where the *arr sees it. Without this the
+> Mapping** in the \*arr (Settings → Download Clients → Remote Path Mappings) so
+> it can translate putioarr's path to where the \*arr sees it. Without this the
 > download completes and is cleaned up, but nothing is ever imported.
 
 ## Troubleshooting
 
 **putioarr downloads (and deletes) the files, but nothing is imported into
 Sonarr/Radarr.**
-This is almost always a path problem: the *arr can't find the files putioarr
+This is almost always a path problem: the \*arr can't find the files putioarr
 downloaded because it's looking at a different path (or doesn't have the volume
 mounted at all). Make sure the download directory is mounted into both
 containers at the same path, or configure a Remote Path Mapping — see *Connecting
-Sonarr/Radarr/Whisparr* above. Confirm the *arr can actually list the files at
+Sonarr/Radarr/Whisparr* above. Confirm the \*arr can actually list the files at
 `download_directory` (or its mapped equivalent).
 
 **The download client tests fine but grabs never appear on put.io.**
-Check that the *arr is sending grabs to putioarr (the Activity → Queue in the
-*arr) and watch putioarr's logs — every grab logs an "uploaded" line. Make sure
+Check that the \*arr is sending grabs to putioarr (the Activity → Queue in the
+\*arr) and watch putioarr's logs — every grab logs an "uploaded" line. Make sure
 the `[putio] api_key` is valid (regenerate with `putioarr get-token`).
 
-**Downloads go to the wrong folder / one *arr imports another's downloads.**
-Set a distinct `category` per *arr in putioarr's config *and* the matching
-Category in each *arr's Transmission settings. See *Category-based Download
+**Downloads go to the wrong folder / one \*arr imports another's downloads.**
+Set a distinct `category` per \*arr in putioarr's config *and* the matching
+Category in each \*arr's Transmission settings. See *Category-based Download
 Directories* above.
 
 **Nothing happens / no logs.** Raise the log level (`loglevel = "debug"` in the
