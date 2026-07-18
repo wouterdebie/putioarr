@@ -209,6 +209,12 @@ pub(crate) async fn handle_torrent_get(
     let active_file_ids: HashSet<i64> = transfers.iter().filter_map(|t| t.file_id).collect();
     app_data.state.retain_file_names(&active_file_ids).await;
 
+    // Track the hashes of everything still present (put.io transfers plus the
+    // orphans reported below) so the local-progress counters can be pruned to
+    // just those at the end, keeping that map bounded (issue #5).
+    let mut active_hashes: HashSet<String> =
+        transfers.iter().filter_map(|t| t.hash.clone()).collect();
+
     // Allocate the token once and share it cheaply (refcount bump) with each
     // per-transfer task, rather than allocating a new String per transfer.
     let api_token: Arc<str> = Arc::from(api_token);
@@ -253,20 +259,46 @@ pub(crate) async fn handle_torrent_get(
                     tt.name = name;
                 }
             }
-            // put.io marks a transfer complete as soon as *its own* (cloud)
-            // download finishes, but the files don't exist on local disk until
-            // putioarr has pulled them down. Reporting completion to the *arr
-            // too early makes it try to import missing files ("No files found
-            // eligible for import"). Keep the torrent in a downloading state
-            // until putioarr has actually finished the local download (#16).
+            // A transfer has two download stages the *arr can't see separately:
+            // put.io's own (cloud) download, then putioarr pulling the files to
+            // local disk. put.io reports 100% as soon as the cloud download
+            // finishes, but the files don't exist locally until the pull is done
+            // — reporting completion then makes the *arr try to import missing
+            // files ("No files found eligible for import", #16). Instead, map the
+            // cloud download to 0-50% and the local pull to 50-100% so the *arr
+            // shows a single bar that keeps moving through both stages and only
+            // reaches 100% once the files are actually on disk (issue #5). Both
+            // stages move the same number of bytes, so the 50/50 split is
+            // byte-accurate.
             let putio_done = tt.is_finished
                 || matches!(
                     tt.status,
                     TransmissionTorrentStatus::Seeding | TransmissionTorrentStatus::Stopped
                 );
-            if putio_done && !app_data.state.is_local_complete(t.id).await {
+            let size = tt.total_size.max(0);
+            if size > 0 && !app_data.state.is_local_complete(t.id).await {
+                let done = if putio_done {
+                    // Cloud finished (first 50%); report the local pull so far as
+                    // the second 50%.
+                    let local = match &t.hash {
+                        Some(hash) => app_data
+                            .state
+                            .local_bytes_downloaded(hash)
+                            .await
+                            .unwrap_or(0)
+                            .min(size as u64) as i64,
+                        None => 0,
+                    };
+                    size / 2 + local / 2
+                } else {
+                    // Still on put.io; scale its progress into the first 50%.
+                    tt.downloaded_ever.clamp(0, size) / 2
+                };
+                tt.downloaded_ever = done;
+                // Keep >= 1 so 0/0 or a near-complete pull isn't read as "done"
+                // before local_complete flips.
+                tt.left_until_done = std::cmp::max(size - done, 1);
                 tt.is_finished = false;
-                tt.left_until_done = std::cmp::max(tt.total_size, 1);
                 tt.status = TransmissionTorrentStatus::Downloading;
             }
             tt
@@ -285,18 +317,27 @@ pub(crate) async fn handle_torrent_get(
             Ok(id) => id,
             Err(_) => continue,
         };
+        active_hashes.insert(orphan.hash.clone());
         let complete = app_data.state.is_local_complete(id).await;
-        // Report consistent size/progress. Keep left_until_done <= total_size,
+        // An orphan's file already exists on put.io (100% cloud), so its only
+        // stage is the local pull — report that directly as 0-100% from the
+        // bytes downloaded so far (issue #5). Keep left_until_done <= total_size,
         // and when incomplete report a non-zero amount remaining even if the
         // size is unknown (put.io omitted it) so a client can't read 0/0 as
         // "done" while it's still downloading.
         let size = orphan.size.max(0);
-        let (total_size, left_until_done) = if complete {
-            (size, 0)
+        let local = app_data
+            .state
+            .local_bytes_downloaded(&orphan.hash)
+            .await
+            .unwrap_or(0)
+            .min(size.max(0) as u64) as i64;
+        let (total_size, left_until_done, downloaded_ever) = if complete {
+            (size, 0, size)
         } else if size > 0 {
-            (size, size)
+            (size, std::cmp::max(size - local, 1), local)
         } else {
-            (1, 1)
+            (1, 1, 0)
         };
         transmission_transfers.push(TransmissionTorrent {
             id,
@@ -314,7 +355,7 @@ pub(crate) async fn handle_torrent_get(
             },
             seconds_downloading: 0,
             error_string: None,
-            downloaded_ever: if complete { size } else { 0 },
+            downloaded_ever,
             seed_ratio_limit: 0.0,
             seed_ratio_mode: 0,
             seed_idle_limit: 0,
@@ -322,6 +363,9 @@ pub(crate) async fn handle_torrent_get(
             file_count: 1,
         });
     }
+
+    // Prune progress counters for transfers that are no longer present.
+    app_data.state.retain_local_bytes(&active_hashes).await;
 
     let torrents = json!(transmission_transfers);
 

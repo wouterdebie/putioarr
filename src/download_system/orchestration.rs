@@ -120,6 +120,12 @@ impl Worker {
             // The files now exist locally, so it's safe to report this transfer
             // as complete to the *arr (see issue #16).
             self.app_data.state.mark_local_complete(t.transfer_id).await;
+            // Local download finished; the progress counter is no longer read
+            // (torrent-get reports completion via local_complete now), so drop
+            // it to keep the map bounded (issue #5).
+            if let Some(hash) = &t.hash {
+                self.app_data.state.clear_local_bytes(hash).await;
+            }
             self.tx
                 .send(TransferMessage::Downloaded(Transfer {
                     targets: Some(targets),

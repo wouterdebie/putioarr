@@ -408,10 +408,13 @@ pub async fn produce_transfers(app_data: Data<AppData>, tx: Sender<TransferMessa
                     "Active transfers: {}",
                     list_transfer_response.transfers.len()
                 );
-                list_transfer_response
-                    .transfers
-                    .iter()
-                    .for_each(|t| info!("  {}", Transfer::from(app_data.clone(), t)));
+                for t in &list_transfer_response.transfers {
+                    let transfer = Transfer::from(app_data.clone(), t);
+                    // Report combined two-stage progress (cloud 0-50%, local pull
+                    // 50-100%) so a stalled download is visible in the log (#5).
+                    let pct = combined_progress_percent(&app_data, t).await;
+                    info!("  {} ({}%)", transfer, pct);
+                }
 
                 start = std::time::Instant::now();
             }
@@ -421,6 +424,41 @@ pub async fn produce_transfers(app_data: Data<AppData>, tx: Sender<TransferMessa
             warn!("List put.io transfers failed. Retrying..");
             continue;
         };
+    }
+}
+
+/// Combined two-stage download progress (0-100) for a transfer, mirroring what
+/// [`crate::http::handlers`] reports to the *arr: put.io's cloud download is the
+/// first 50%, pulling the files to local disk is the second 50% (issue #5). Used
+/// for the periodic status log so a stuck download is distinguishable from one
+/// that's still making progress.
+async fn combined_progress_percent(app_data: &Data<AppData>, t: &PutIOTransfer) -> u64 {
+    if app_data.state.is_local_complete(t.id).await {
+        return 100;
+    }
+    let size = t.size.unwrap_or(0).max(0) as u64;
+    if size == 0 {
+        return 0;
+    }
+    let putio_done = t.finished_at.is_some()
+        || matches!(
+            t.status.to_uppercase().as_str(),
+            "SEEDING" | "COMPLETED" | "STOPPED"
+        );
+    if putio_done {
+        let local = match &t.hash {
+            Some(hash) => app_data
+                .state
+                .local_bytes_downloaded(hash)
+                .await
+                .unwrap_or(0)
+                .min(size),
+            None => 0,
+        };
+        50 + 50 * local / size
+    } else {
+        let downloaded = (t.downloaded.unwrap_or(0).max(0) as u64).min(size);
+        50 * downloaded / size
     }
 }
 

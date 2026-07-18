@@ -3,6 +3,7 @@ use anyhow::Result;
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
@@ -62,6 +63,14 @@ pub struct StateManager {
     /// the log. A misconfigured Sonarr/Radarr fails on every poll for every
     /// transfer, and logging each one filled users' disks over time (issue #21).
     arr_error_logged: Arc<RwLock<HashMap<String, Instant>>>,
+    /// Bytes pulled to local disk so far, keyed by transfer hash. put.io's own
+    /// percentage only covers the cloud download; this tracks the second stage
+    /// (put.io -> local disk) so the *arr can show real progress instead of a
+    /// bar frozen at 0% while the files are being pulled (issue #5). Written
+    /// lock-free per chunk by the download workers via an AtomicU64, and read
+    /// only when the *arr polls or the status line is logged, so it adds no
+    /// measurable cost to the download hot path.
+    local_bytes: Arc<RwLock<HashMap<String, Arc<AtomicU64>>>>,
 }
 
 impl StateManager {
@@ -74,7 +83,44 @@ impl StateManager {
             failed_names: Arc::new(RwLock::new(HashMap::new())),
             orphans: Arc::new(RwLock::new(HashMap::new())),
             arr_error_logged: Arc::new(RwLock::new(HashMap::new())),
+            local_bytes: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+
+    /// Returns the shared byte counter for a transfer's local download, creating
+    /// it on first use. Download workers hold this and add to it per chunk, so
+    /// progress accumulates lock-free across the (possibly several) files of a
+    /// transfer (issue #5).
+    pub async fn local_byte_counter(&self, hash: &str) -> Arc<AtomicU64> {
+        self.local_bytes
+            .write()
+            .await
+            .entry(hash.to_string())
+            .or_insert_with(|| Arc::new(AtomicU64::new(0)))
+            .clone()
+    }
+
+    /// Bytes pulled to local disk so far for a transfer, or None if it isn't
+    /// being downloaded (no counter registered yet).
+    pub async fn local_bytes_downloaded(&self, hash: &str) -> Option<u64> {
+        self.local_bytes
+            .read()
+            .await
+            .get(hash)
+            .map(|c| c.load(Ordering::Relaxed))
+    }
+
+    /// Forgets a transfer's local byte counter once it's done or removed, so the
+    /// map doesn't grow without bound over the process lifetime.
+    pub async fn clear_local_bytes(&self, hash: &str) {
+        self.local_bytes.write().await.remove(hash);
+    }
+
+    /// Drops local byte counters for transfers no longer present, keeping the
+    /// map bounded regardless of which cleanup path a transfer took (mirrors
+    /// [`Self::retain_file_names`]).
+    pub async fn retain_local_bytes(&self, keep: &HashSet<String>) {
+        self.local_bytes.write().await.retain(|h, _| keep.contains(h));
     }
 
     /// Minimum time between logging the same *arr's connection error.

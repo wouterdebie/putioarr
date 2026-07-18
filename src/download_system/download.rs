@@ -8,6 +8,7 @@ use file_owner::PathExt;
 use futures::StreamExt;
 use log::{error, info, warn};
 use nix::unistd::Uid;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use std::{fs, path::Path};
 
@@ -69,10 +70,16 @@ async fn download_target(app_data: &Data<AppData>, target: &DownloadTarget) -> R
             }
         }
         TargetType::File => {
+            // Shared per-transfer counter of bytes pulled to local disk, so the
+            // *arr can show second-stage progress (issue #5).
+            let counter = app_data
+                .state
+                .local_byte_counter(&target.transfer_hash)
+                .await;
             // Delete file if already exists
             if !Path::new(&target.to).exists() {
                 info!("{}: download {}", &target, "started".yellow());
-                match fetch(target, app_data.config.uid, &app_data.http).await {
+                match fetch(target, app_data.config.uid, &app_data.http, &counter).await {
                     Ok(_) => info!("{}: download {}", &target, "succeeded".green()),
                     Err(e) => {
                         error!("{}: download {}: {}", &target, "failed".red(), e);
@@ -80,6 +87,12 @@ async fn download_target(app_data: &Data<AppData>, target: &DownloadTarget) -> R
                     }
                 };
             } else {
+                // Already fully downloaded (e.g. a resumed run after the files
+                // were pulled but not yet imported): still count its bytes so the
+                // aggregate progress across the transfer's files stays accurate.
+                if let Ok(m) = fs::metadata(&target.to) {
+                    counter.fetch_add(m.len(), Ordering::Relaxed);
+                }
                 info!("{}: already exists", &target);
             }
         }
@@ -87,8 +100,21 @@ async fn download_target(app_data: &Data<AppData>, target: &DownloadTarget) -> R
     Ok(())
 }
 
-async fn fetch(target: &DownloadTarget, uid: u32, client: &reqwest::Client) -> Result<()> {
+async fn fetch(
+    target: &DownloadTarget,
+    uid: u32,
+    client: &reqwest::Client,
+    counter: &AtomicU64,
+) -> Result<()> {
     let tmp_path = format!("{}.downloading", &target.to);
+
+    // Seed the shared counter with bytes already on disk for this file (from a
+    // previous attempt or a restart mid-download). The resume logic below only
+    // streams the remaining bytes, and each streamed chunk is added on top, so
+    // the counter reflects the true amount pulled. One stat, no hot-path lock.
+    if let Ok(m) = tokio::fs::metadata(&tmp_path).await {
+        counter.fetch_add(m.len(), Ordering::Relaxed);
+    }
 
     // Make sure the destination directory exists. A File target can be processed
     // before its parent Directory target, and external cleanup may have removed
@@ -106,7 +132,7 @@ async fn fetch(target: &DownloadTarget, uid: u32, client: &reqwest::Client) -> R
     let mut attempt = 0;
     loop {
         attempt += 1;
-        match fetch_attempt(target, &tmp_path, client).await {
+        match fetch_attempt(target, &tmp_path, client, counter).await {
             Ok(()) => break,
             Err(e) if attempt < MAX_ATTEMPTS => {
                 warn!("{}: download attempt {} failed ({}), resuming", target, attempt, e);
@@ -133,6 +159,7 @@ async fn fetch_attempt(
     target: &DownloadTarget,
     tmp_path: &str,
     client: &reqwest::Client,
+    counter: &AtomicU64,
 ) -> Result<()> {
     let existing = tokio::fs::metadata(tmp_path)
         .await
@@ -176,7 +203,10 @@ async fn fetch_attempt(
     loop {
         match tokio::time::timeout(STREAM_IDLE_TIMEOUT, byte_stream.next()).await {
             Ok(Some(item)) => {
-                tokio::io::copy(&mut item?.as_ref(), &mut tmp_file).await?;
+                let chunk = item?;
+                tokio::io::copy(&mut chunk.as_ref(), &mut tmp_file).await?;
+                // Lock-free running total for progress reporting (issue #5).
+                counter.fetch_add(chunk.len() as u64, Ordering::Relaxed);
             }
             Ok(None) => break,
             Err(_) => bail!("stalled: no data received for {:?}", STREAM_IDLE_TIMEOUT),
