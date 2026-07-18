@@ -131,8 +131,8 @@ orchestration_workers = 10
 download_workers = 4
 
 # Optional. When false (default), locally downloaded files are deleted after
-# sonarr/radarr/whisparr imports them. Set to true to keep them in
-# download_directory instead (put.io transfers/files are still cleaned up).
+# the *arr imports them. Set to true to keep them in download_directory instead
+# (put.io transfers/files are still cleaned up).
 keep_downloads = false
 
 [putio]

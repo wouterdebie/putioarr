@@ -11,10 +11,7 @@ use anyhow::Result;
 use async_channel::{Receiver, Sender};
 use colored::*;
 use log::{info, warn};
-use std::{
-    fs,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 use tokio::{fs::metadata, time::sleep};
 
 use super::transfer::TransferMessage;
@@ -163,19 +160,22 @@ async fn watch_for_import(
             if app_data.config.keep_downloads {
                 info!("{}: keeping local download (keep_downloads)", &top_level_target);
             } else {
-                match metadata(&top_level_target.to).await {
+                // Use async fs and log failures instead of unwrap/panic: a failed
+                // delete (permissions, a concurrent removal, the path already gone)
+                // shouldn't take the process down, and blocking fs here could stall
+                // the runtime under load.
+                let result = match metadata(&top_level_target.to).await {
                     Ok(m) if m.is_dir() => {
-                        fs::remove_dir_all(&top_level_target.to).unwrap();
-                        info!("{}: deleted", &top_level_target);
+                        tokio::fs::remove_dir_all(&top_level_target.to).await
                     }
-                    Ok(m) if m.is_file() => {
-                        fs::remove_file(&top_level_target.to).unwrap();
-                        info!("{}: deleted", &top_level_target);
-                    }
-                    Ok(_) | Err(_) => {
-                        panic!("{}: no idea how to handle", &top_level_target)
-                    }
+                    Ok(m) if m.is_file() => tokio::fs::remove_file(&top_level_target.to).await,
+                    // Neither a file nor a dir (e.g. already removed): nothing to do.
+                    Ok(_) | Err(_) => Ok(()),
                 };
+                match result {
+                    Ok(_) => info!("{}: deleted", &top_level_target),
+                    Err(e) => warn!("{}: failed to delete local copy: {}", &top_level_target, e),
+                }
             }
             // An orphan has no put.io transfer to remove or seed, so finish it
             // here directly instead of routing an Imported message through a
