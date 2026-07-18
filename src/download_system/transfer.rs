@@ -461,7 +461,19 @@ async fn scan_watch_folders(
         return;
     }
     let api_key = &app_data.config.putio.api_key;
-    let active_file_ids: HashSet<i64> = active_transfers.iter().filter_map(|t| t.file_id).collect();
+    // Only files backed by a *managed* active transfer are handled the normal
+    // way by the main loop. Unmanaged active transfers (e.g. a manually added
+    // put.io Watch List entry, or one whose state was lost) are skipped there,
+    // so their completed files must be picked up here as orphans — otherwise
+    // both paths ignore them and they are never downloaded/imported.
+    let mut managed_active_file_ids: HashSet<i64> = HashSet::new();
+    for t in active_transfers {
+        if let Some(file_id) = t.file_id {
+            if is_managed(app_data, t).await {
+                managed_active_file_ids.insert(file_id);
+            }
+        }
+    }
 
     for folder_id in &app_data.config.watch_folders {
         let resp = match putio::list_files(api_key, *folder_id).await {
@@ -477,11 +489,13 @@ async fn scan_watch_folders(
             if file.id < 0 || !matches!(file.file_type.as_str(), "FOLDER" | "VIDEO" | "AUDIO") {
                 continue;
             }
-            // Skip the result of an active transfer (handled the normal way) and
-            // any orphan we're already pulling. Using `has_orphan` as the
-            // "in progress" marker keeps tracking bounded and, since a failed
-            // orphan is dropped from it, lets a later poll retry it.
-            if active_file_ids.contains(&file.id) || app_data.state.has_orphan(file.id).await {
+            // Skip the result of a *managed* active transfer (handled the normal
+            // way) and any orphan we're already pulling. Files from unmanaged
+            // active transfers fall through the main loop, so they are handled
+            // here. Using `has_orphan` as the "in progress" marker keeps tracking
+            // bounded and, since a failed orphan is dropped from it, lets a later
+            // poll retry it.
+            if managed_active_file_ids.contains(&file.id) || app_data.state.has_orphan(file.id).await {
                 continue;
             }
 
