@@ -85,6 +85,7 @@ impl From<PutIOTransfer> for TransmissionTorrent {
         let seconds_downloading = (now - started_at).num_seconds();
         let default = &"Unknown".to_string();
         let name = t.name.as_ref().unwrap_or(default);
+        let is_finished = t.finished_at.is_some();
         Self {
             id: t.id,
             hash_string: t.hash,
@@ -92,11 +93,20 @@ impl From<PutIOTransfer> for TransmissionTorrent {
             download_dir: String::from(""),
             total_size: t.size.unwrap_or(0),
             left_until_done: max(t.size.unwrap_or(0) - t.downloaded.unwrap_or(0), 0),
-            is_finished: t.finished_at.is_some(),
+            is_finished,
             eta: t.estimated_time.unwrap_or(0),
             status: TransmissionTorrentStatus::from(t.status),
             seconds_downloading,
-            error_string: t.error_message,
+            // put.io can leave error_message set from a transient problem it
+            // recovered from on its own (e.g. "not enough space" during
+            // allocation, retried, then completed) without ever clearing the
+            // field. Forwarding it verbatim on a transfer that went on to
+            // finish makes the *arr's Transmission client treat an otherwise
+            // complete download as still erroring, which blocks Completed
+            // Download Handling from ever importing it. Only surface the
+            // error while the transfer hasn't finished, when it still
+            // reflects a real, current problem.
+            error_string: if is_finished { None } else { t.error_message },
             downloaded_ever: t.downloaded.unwrap_or(0),
             seed_ratio_limit: 0.0,
             seed_ratio_mode: 0,
@@ -133,5 +143,74 @@ impl From<String> for TransmissionTorrentStatus {
                 Self::CheckWait
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A transfer that finished cleanly, with no `error_message` and no
+    /// `finished_at`/`started_at` set, for tests to override as needed.
+    fn base_transfer() -> PutIOTransfer {
+        PutIOTransfer {
+            id: 1,
+            hash: Some("abc123".to_string()),
+            name: Some("Some.Movie.2024".to_string()),
+            size: Some(1000),
+            downloaded: Some(1000),
+            finished_at: None,
+            estimated_time: None,
+            status: "COMPLETED".to_string(),
+            started_at: None,
+            error_message: None,
+            file_id: Some(42),
+            userfile_exists: true,
+        }
+    }
+
+    #[test]
+    fn stale_error_on_a_finished_transfer_is_dropped() {
+        let t = PutIOTransfer {
+            finished_at: Some("2024-01-01T00:00:00".to_string()),
+            error_message: Some("You need 4.5 G free space to start this transfer.".to_string()),
+            ..base_transfer()
+        };
+
+        let torrent: TransmissionTorrent = t.into();
+
+        assert!(torrent.is_finished);
+        assert_eq!(torrent.error_string, None);
+    }
+
+    #[test]
+    fn error_on_an_unfinished_transfer_is_kept() {
+        let t = PutIOTransfer {
+            finished_at: None,
+            error_message: Some("Not enough space on put.io account.".to_string()),
+            ..base_transfer()
+        };
+
+        let torrent: TransmissionTorrent = t.into();
+
+        assert!(!torrent.is_finished);
+        assert_eq!(
+            torrent.error_string,
+            Some("Not enough space on put.io account.".to_string())
+        );
+    }
+
+    #[test]
+    fn finished_transfer_with_no_error_is_unaffected() {
+        let t = PutIOTransfer {
+            finished_at: Some("2024-01-01T00:00:00".to_string()),
+            error_message: None,
+            ..base_transfer()
+        };
+
+        let torrent: TransmissionTorrent = t.into();
+
+        assert!(torrent.is_finished);
+        assert_eq!(torrent.error_string, None);
     }
 }
