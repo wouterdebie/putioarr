@@ -92,6 +92,12 @@ impl StateManager {
     /// progress accumulates lock-free across the (possibly several) files of a
     /// transfer (issue #5).
     pub async fn local_byte_counter(&self, hash: &str) -> Arc<AtomicU64> {
+        // Fast path: the counter almost always already exists (a transfer's
+        // several files all resolve the same one), so take only a read lock and
+        // avoid contending the write lock across download workers.
+        if let Some(counter) = self.local_bytes.read().await.get(hash) {
+            return counter.clone();
+        }
         self.local_bytes
             .write()
             .await

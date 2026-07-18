@@ -455,7 +455,11 @@ async fn combined_progress_percent(app_data: &Data<AppData>, t: &PutIOTransfer) 
                 .min(size),
             None => 0,
         };
-        50 + 50 * local / size
+        // Cap at 99 until local_complete flips (handled by the early return
+        // above): the counter can reach `size` a moment before the transfer is
+        // marked complete, and logging 100% then would misreport a still-active
+        // pull as finished.
+        (50 + 50 * local / size).min(99)
     } else {
         let downloaded = (t.downloaded.unwrap_or(0).max(0) as u64).min(size);
         50 * downloaded / size

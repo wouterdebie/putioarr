@@ -195,10 +195,16 @@ pub(crate) async fn handle_torrent_get(
     api_token: &str,
     app_data: &web::Data<AppData>,
 ) -> Option<serde_json::Value> {
+    // Whether the account listing actually succeeded. On failure `transfers` is
+    // empty, which must not be mistaken for "nothing is on the account" when
+    // pruning per-transfer progress counters below (issue #5) — that would wipe
+    // progress for downloads still in flight.
+    let mut listing_ok = true;
     let transfers = match putio::list_transfers(api_token).await {
         Ok(r) => r.transfers,
         Err(e) => {
             error!("Failed to list put.io transfers: {}", e);
+            listing_ok = false;
             Vec::new()
         }
     };
@@ -276,28 +282,36 @@ pub(crate) async fn handle_torrent_get(
                     TransmissionTorrentStatus::Seeding | TransmissionTorrentStatus::Stopped
                 );
             let size = tt.total_size.max(0);
-            if size > 0 && !app_data.state.is_local_complete(t.id).await {
-                let done = if putio_done {
-                    // Cloud finished (first 50%); report the local pull so far as
-                    // the second 50%.
-                    let local = match &t.hash {
-                        Some(hash) => app_data
-                            .state
-                            .local_bytes_downloaded(hash)
-                            .await
-                            .unwrap_or(0)
-                            .min(size as u64) as i64,
-                        None => 0,
+            if !app_data.state.is_local_complete(t.id).await {
+                if size > 0 {
+                    let done = if putio_done {
+                        // Cloud finished (first 50%); report the local pull so
+                        // far as the second 50%.
+                        let local = match &t.hash {
+                            Some(hash) => app_data
+                                .state
+                                .local_bytes_downloaded(hash)
+                                .await
+                                .unwrap_or(0)
+                                .min(size as u64) as i64,
+                            None => 0,
+                        };
+                        size / 2 + local / 2
+                    } else {
+                        // Still on put.io; scale its progress into the first 50%.
+                        tt.downloaded_ever.clamp(0, size) / 2
                     };
-                    size / 2 + local / 2
+                    tt.downloaded_ever = done;
+                    // Keep >= 1 so 0/0 or a near-complete pull isn't read as
+                    // "done" before local_complete flips.
+                    tt.left_until_done = std::cmp::max(size - done, 1);
                 } else {
-                    // Still on put.io; scale its progress into the first 50%.
-                    tt.downloaded_ever.clamp(0, size) / 2
-                };
-                tt.downloaded_ever = done;
-                // Keep >= 1 so 0/0 or a near-complete pull isn't read as "done"
-                // before local_complete flips.
-                tt.left_until_done = std::cmp::max(size - done, 1);
+                    // Size unknown (put.io omitted it): we can't show a
+                    // percentage, but the local pull still isn't done, so leave a
+                    // non-zero amount remaining rather than let 0/0 read as
+                    // complete and trigger an early import (#16).
+                    tt.left_until_done = std::cmp::max(tt.left_until_done, 1);
+                }
                 tt.is_finished = false;
                 tt.status = TransmissionTorrentStatus::Downloading;
             }
@@ -364,8 +378,12 @@ pub(crate) async fn handle_torrent_get(
         });
     }
 
-    // Prune progress counters for transfers that are no longer present.
-    app_data.state.retain_local_bytes(&active_hashes).await;
+    // Prune progress counters for transfers that are no longer present — but
+    // only when the account listing succeeded, so a transient list failure
+    // (empty `active_hashes`) can't wipe progress for in-flight downloads (#5).
+    if listing_ok {
+        app_data.state.retain_local_bytes(&active_hashes).await;
+    }
 
     let torrents = json!(transmission_transfers);
 
