@@ -8,6 +8,10 @@ on:
     tags:
       - v*
 
+permissions:
+  contents: read
+  packages: write
+
 env:
   REGISTRY_IMAGE: ghcr.io/wouterdebie/putioarr
   DOCKERFILE_PATH: ./docker/Dockerfile
@@ -41,7 +45,7 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
-          password: ${{ secrets.CR_PAT }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push by digest
         id: build
@@ -87,7 +91,7 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
-          password: ${{ secrets.CR_PAT }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Determine image tags
         id: docker_tags
