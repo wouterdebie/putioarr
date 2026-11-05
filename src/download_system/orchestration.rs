@@ -14,7 +14,7 @@ use log::{info, warn};
 use std::time::{Duration, Instant};
 use tokio::{fs::metadata, time::sleep};
 
-use super::transfer::TransferMessage;
+use super::transfer::{TargetType, TransferMessage};
 
 #[derive(Clone)]
 pub struct Worker {
@@ -88,6 +88,16 @@ impl Worker {
         if targets.is_empty() {
             warn!("{}: no downloadable targets, skipping", t);
             return Ok(());
+        }
+        // Only folders and no files: still report it complete so the *arr shows
+        // why it can't import it, but it is never treated as imported, so its
+        // put.io copy stays.
+        if !targets.iter().any(|t| t.target_type == TargetType::File) {
+            warn!(
+                "{}: no video or audio files to download (archives only?); the *arr won't \
+                 find anything to import, so it stays on put.io",
+                t
+            );
         }
         // A status channel per target for the download workers to report back.
         let done_channels: Vec<(Sender<DownloadDoneStatus>, Receiver<DownloadDoneStatus>)> =

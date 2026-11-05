@@ -52,6 +52,15 @@ impl Transfer {
             .filter(|t| t.target_type == TargetType::File)
             .collect::<Vec<DownloadTarget>>();
 
+        // With no files to check, `all()` below is vacuously true, and the
+        // transfer's local folder and put.io copy get deleted as "imported".
+        // That happens when a transfer has only files putioarr doesn't download,
+        // such as a RAR release (put.io type ARCHIVE). Nothing was downloaded,
+        // so nothing can have been imported.
+        if targets.is_empty() {
+            return false;
+        }
+
         let mut results = Vec::<bool>::new();
         for target in targets {
             let mut service_results = vec![];
@@ -563,8 +572,10 @@ async fn scan_watch_folders(
 
             let mut transfer = Transfer::from_orphan(app_data.clone(), file.id, file.name.clone());
             let targets = match transfer.get_download_targets_in(&download_dir).await {
-                Ok(t) if !t.is_empty() => t,
-                Ok(_) => continue, // no downloadable (video) content
+                // Leave anything without a file to download (e.g. only RAR
+                // parts) on put.io: it can never be imported.
+                Ok(t) if t.iter().any(|t| t.target_type == TargetType::File) => t,
+                Ok(_) => continue, // no downloadable (video/audio) files
                 Err(e) => {
                     warn!("{}: orphan target generation failed: {}", transfer, e);
                     continue;
@@ -608,5 +619,73 @@ async fn scan_watch_folders(
                     .await;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use figment::{
+        providers::{Format, Toml},
+        Figment,
+    };
+
+    /// AppData with no *arr configured, so `is_imported` makes no HTTP calls.
+    fn app_data() -> Data<AppData> {
+        let config: crate::Config = Figment::new()
+            .merge(Toml::string(
+                r#"
+                bind_address = "0.0.0.0"
+                download_directory = "/downloads"
+                download_workers = 1
+                loglevel = "info"
+                orchestration_workers = 1
+                password = "p"
+                polling_interval = 10
+                port = 9091
+                skip_directories = ["sample"]
+                uid = 1000
+                username = "u"
+                [putio]
+                api_key = "k"
+                "#,
+            ))
+            .extract()
+            .unwrap();
+        Data::new(AppData {
+            config,
+            state: crate::state::StateManager::new("k".to_string()),
+            http: reqwest::Client::new(),
+        })
+    }
+
+    fn target(target_type: TargetType, to: &str) -> DownloadTarget {
+        DownloadTarget {
+            from: None,
+            to: to.to_string(),
+            target_type,
+            top_level: false,
+            transfer_hash: "0".repeat(40),
+            media_type: Some(MediaType::Video),
+        }
+    }
+
+    #[actix_rt::test]
+    async fn transfer_with_only_folders_is_not_imported() {
+        // e.g. a RAR release: the folder is a target, the ARCHIVE parts aren't.
+        let mut t = Transfer::from_orphan(app_data(), 1, "Some.Release".to_string());
+        t.targets = Some(vec![target(TargetType::Directory, "/downloads/Some.Release")]);
+        assert!(!t.is_imported().await);
+    }
+
+    #[actix_rt::test]
+    async fn file_with_no_arr_to_ask_still_counts_as_imported() {
+        // Unchanged behaviour: a file no configured *arr handles doesn't block.
+        let mut t = Transfer::from_orphan(app_data(), 1, "Some.Release".to_string());
+        t.targets = Some(vec![
+            target(TargetType::Directory, "/downloads/Some.Release"),
+            target(TargetType::File, "/downloads/Some.Release/movie.mkv"),
+        ]);
+        assert!(t.is_imported().await);
     }
 }
