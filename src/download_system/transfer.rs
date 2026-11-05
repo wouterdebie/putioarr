@@ -53,7 +53,71 @@ impl Transfer {
             .collect::<Vec<DownloadTarget>>();
 
         let mut results = Vec::<bool>::new();
+        let mut dir_import_cache = std::collections::HashMap::<String, bool>::new();
         for target in targets {
+            // ARCHIVE targets (multi-volume RAR parts) are
+            // never reported by the *arr history API -- only the video file
+            // Unpackerr extracts from them gets a downloadFolderImported
+            // event, under a different path. So instead of asking the *arr,
+            // treat an ARCHIVE target as "imported" once it no longer exists
+            // on disk under its expected path: Unpackerr deletes/consumes
+            // the .rar/.rNN parts once it finishes extracting. Until then
+            // this keeps returning false, so is_imported() (and therefore
+            // the local-copy delete) correctly waits for the real
+            // extraction instead of firing on the first poll against an
+            // empty non-ARCHIVE target list (the original bug).
+            if target.media_type == Some(MediaType::Archive) {
+                // Fast path: the extractor may be configured to delete the
+                // archive parts after extraction (unpackerr delete_orig).
+                if !Path::new(&target.to).exists() {
+                    info!("{}: archive part gone (extracted)", &target);
+                    results.push(true);
+                    continue;
+                }
+                // Otherwise ask the *arrs whether anything was imported from
+                // this archive's directory: the import event points at the
+                // extracted video file, which lives under the same transfer
+                // directory as the parts. One lookup per directory is enough,
+                // so cache the answer across the (potentially many) parts.
+                // Use the parent directory NAME (not full path): the *arr may
+                // see the download dir under a different path mapping, so we
+                // match on the unique transfer folder name inside droppedPath.
+                let dir = Path::new(&target.to)
+                    .parent()
+                    .and_then(|p| p.file_name())
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| target.to.clone());
+                if let Some(hit) = dir_import_cache.get(&dir) {
+                    results.push(*hit);
+                    continue;
+                }
+                let mut dir_imported = false;
+                for app in &apps {
+                    match app.check_imported_dir(&dir).await {
+                        Ok(true) => {
+                            dir_imported = true;
+                            break;
+                        }
+                        Ok(false) => {}
+                        Err(e) => {
+                            if self.app_data.state.should_log_arr_error(&app.name).await {
+                                error!(
+                                    "Error retrieving history from {} (suppressing repeats for {:?}): {}",
+                                    app,
+                                    crate::state::StateManager::ARR_ERROR_LOG_INTERVAL,
+                                    e
+                                );
+                            }
+                        }
+                    }
+                }
+                if dir_imported {
+                    info!("{}: archive extracted and imported from {}", &target, dir);
+                }
+                dir_import_cache.insert(dir, dir_imported);
+                results.push(dir_imported);
+                continue;
+            }
             let mut service_results = vec![];
             for app in &apps {
                 // Only ask an *arr about files matching its media type.
@@ -235,6 +299,28 @@ async fn recurse_download_targets(
                 media_type: MediaType::from_putio(response.parent.file_type.as_str()),
             });
         }
+        // put.io classifies multi-volume RAR parts as ARCHIVE,
+        // which historically fell through to the `other` arm below and was
+        // never turned into a File target. is_imported() filters to File
+        // targets and then does `.all(|x| x)` over that list -- an empty
+        // list makes `.all()` vacuously true, so a transfer containing only
+        // ARCHIVE files (nothing the *arr could ever have imported, since
+        // Unpackerr has not extracted it yet) was incorrectly reported as
+        // "imported" on the very first poll and its local copy deleted
+        // before Unpackerr got a chance to run. Track ARCHIVE files as Video
+        // targets too so is_imported() actually waits for a real
+        // downloadFolderImported event (post-extraction) before cleaning up.
+        "ARCHIVE" if app_data.config.download_archives => {
+            let url = putio::url(&app_data.config.putio.api_key, response.parent.id).await?;
+            targets.push(DownloadTarget {
+                from: Some(url),
+                target_type: TargetType::File,
+                to,
+                top_level,
+                transfer_hash: hash.to_string(),
+                media_type: MediaType::from_putio(response.parent.file_type.as_str()),
+            });
+        }
         other => {
             debug!(
                 "{}: skipping file type {}",
@@ -257,6 +343,12 @@ pub enum TransferMessage {
 pub enum MediaType {
     Audio,
     Video,
+    /// Multi-volume RAR parts (put.io file_type ARCHIVE).
+    /// Tracked separately from Video so is_imported() can use a different
+    /// completion check (local file presence, since the *arr never reports
+    /// a downloadFolderImported history event for a .rNN/.rar path -- only
+    /// for the video file Unpackerr extracts from it).
+    Archive,
 }
 
 impl MediaType {
@@ -264,6 +356,7 @@ impl MediaType {
         match file_type {
             "AUDIO" => Some(Self::Audio),
             "VIDEO" => Some(Self::Video),
+            "ARCHIVE" => Some(Self::Archive),
             _ => None,
         }
     }

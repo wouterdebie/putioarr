@@ -130,6 +130,12 @@ orchestration_workers = 10
 # Optional number of download workers, default 4. This controls how many downloads we run in parallel.
 download_workers = 4
 
+# Optional, default false. When true, multi-volume RAR releases (put.io file
+# type ARCHIVE) are downloaded like any other file instead of being skipped.
+# Pair with an external extractor such as Unpackerr pointed at
+# download_directory -- see "Archive / RAR support" below.
+download_archives = false
+
 [putio]
 # Required. Putio API key. You can generate one using `putioarr get-token`
 api_key =  "MYPUTIOKEY"
@@ -156,6 +162,27 @@ api_key = "MYWHISPARRAPIKEY"
 # Optional: Download to a category-specific subdirectory (e.g., /downloads/adult/)
 # category = "adult"
 ```
+
+### Archive / RAR support (Unpackerr integration)
+
+By default, putioarr only downloads `VIDEO`/`AUDIO` files. Multi-volume RAR
+releases (`.rar`/`.r00`/`.r01`/...) are skipped entirely -- and because a
+transfer with nothing downloadable was previously (incorrectly) treated as
+already imported, such transfers used to vanish with **nothing ever
+downloaded** and no error.
+
+Set `download_archives = true` to change this: putioarr downloads the RAR
+parts like any other file, and waits for something else -- typically
+[Unpackerr](https://github.com/Unpackerr/unpackerr) watching the same
+`download_directory` -- to extract them. putioarr detects completion once
+either:
+- the archive parts are gone from disk (e.g. Unpackerr's `delete_orig`), or
+- the *arr reports a `downloadFolderImported` history event for a file
+  inside that transfer's directory (the extracted video).
+
+Only enable this if you run an extractor pointed at the same download
+directory; otherwise the RAR parts will sit there until `import_timeout_secs`
+is reached.
 
 ### Category-based Download Directories
 

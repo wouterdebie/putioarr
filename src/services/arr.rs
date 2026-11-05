@@ -94,7 +94,33 @@ impl ArrApp {
         }
     }
 
+    /// Like [`check_imported`], but matches any import event whose droppedPath
+    /// sits UNDER `dir` instead of an exact path match. Used for archive
+    /// transfers: the *arr never imports the .rar/.rNN parts themselves, it
+    /// imports the video file Unpackerr extracts into the same directory, so
+    /// the archive parts can only be tied back to the transfer through their
+    /// parent directory.
+    /// `dir_name` is the transfer directory's *name* (last component), not a
+    /// full path: the *arr may see the download directory under a different
+    /// mount/remote path mapping than putioarr does, so full-path comparison
+    /// would never match. The unique transfer folder name is mapping-agnostic.
+    pub async fn check_imported_dir(&self, dir_name: &str) -> Result<bool> {
+        self.check_imported_matching(&|dropped: &str| {
+            std::path::Path::new(dropped)
+                .components()
+                .any(|comp| comp.as_os_str().to_string_lossy() == dir_name)
+        })
+        .await
+    }
+
     pub async fn check_imported(&self, target: &str) -> Result<bool> {
+        self.check_imported_matching(&|dropped: &str| dropped == target)
+            .await
+    }
+
+    /// Shared history scan: returns true when any import event's droppedPath
+    /// satisfies `matches`.
+    async fn check_imported_matching(&self, matches: &(dyn Fn(&str) -> bool + Sync)) -> Result<bool> {
         let client = reqwest::Client::new();
         let mut inspected = 0;
         let mut page = 0;
@@ -123,7 +149,7 @@ impl ArrApp {
                         .data
                         .get("droppedPath")
                         .and_then(|v| v.as_ref())
-                        .map(|p| p == target)
+                        .map(|p| matches(p))
                         .unwrap_or(false)
                 {
                     return Ok(true);

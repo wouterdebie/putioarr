@@ -82,6 +82,13 @@ pub struct Config {
     /// lets the put.io account be shared with manual downloads.
     #[serde(default)]
     download_unmanaged: bool,
+    /// When true, also download ARCHIVE files (e.g. multi-volume RAR releases)
+    /// and hand them to an external extractor such as Unpackerr. Completion is
+    /// then detected either by the archive parts disappearing from disk
+    /// (extractor cleanup) or by the *arr importing a file from the transfer's
+    /// directory. When false (default), archives are skipped as before.
+    #[serde(default)]
+    download_archives: bool,
     /// put.io folder ids to additionally scan for *orphaned* completed files:
     /// files that were downloaded but whose transfer record no longer exists
     /// (e.g. put.io's "clear completed transfers" removes the transfer while
