@@ -45,6 +45,21 @@ fn determine_category(download_dir: &str, config: &Config) -> String {
     "default".to_string()
 }
 
+fn category_from_labels(
+    arguments: &serde_json::Map<String, serde_json::Value>,
+    config: &Config,
+) -> Option<String> {
+    let labels = arguments.get("labels")?.as_array()?;
+    let label = labels.iter().filter_map(|l| l.as_str()).find(|l| {
+        config
+            .all_arrs()
+            .iter()
+            .any(|(_, _, arr)| arr.category.as_deref() == Some(*l))
+    })?;
+    info!("category match: label {:?}", label);
+    Some(label.to_string())
+}
+
 pub(crate) async fn handle_torrent_add(
     api_token: &str,
     payload: &web::Json<TransmissionRequest>,
@@ -61,7 +76,8 @@ pub(crate) async fn handle_torrent_add(
         .unwrap_or(&app_data.config.download_directory)
         .to_string();
 
-    let category = determine_category(&download_dir, &app_data.config);
+    let category = category_from_labels(arguments, &app_data.config)
+        .unwrap_or_else(|| determine_category(&download_dir, &app_data.config));
     if arguments.contains_key("metainfo") {
         // .torrent files
         let b64 = arguments["metainfo"].as_str().unwrap();
