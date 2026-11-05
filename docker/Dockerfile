@@ -12,8 +12,7 @@ COPY docker/build.sh /usr/local/bin
 RUN USER=root cargo new putioarr
 
 # We want dependencies cached, so copy those first.
-COPY Cargo.toml Cargo.lock .cargo/ /usr/src/putioarr/
-COPY .cargo/ /usr/src/putioarr/.cargo/
+COPY Cargo.toml Cargo.lock /usr/src/putioarr/
 
 # Set the working directory
 WORKDIR /usr/src/putioarr
@@ -41,9 +40,10 @@ ARG BUILD_DATE
 ARG VERSION
 
 LABEL maintainer="wouterdebie"
+# The base image sets this to linuxserver's repo; GHCR uses it to link the package.
+LABEL org.opencontainers.image.source="https://github.com/wouterdebie/putioarr"
 LABEL org.opencontainers.image.architecture="${TARGETARCH}"
 
-RUN apk add musl gcc gcompat
 COPY --from=builder /usr/bin/putioarr /usr/bin
 
 # add local files

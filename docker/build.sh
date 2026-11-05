@@ -8,11 +8,9 @@ fi
 
 case $TARGETARCH in
     "amd64")
-        apt install -y musl-tools
         export CARGO_BUILD_TARGET=x86_64-unknown-linux-musl
     ;;
     "arm64")
-        apt install -y musl-tools
         export CARGO_BUILD_TARGET=aarch64-unknown-linux-musl
     ;;
     *)
@@ -21,7 +19,9 @@ case $TARGETARCH in
     ;;
 esac
 
-export RUSTFLAGS="-Ctarget-feature=-crt-static"
+# musl-gcc builds the C parts of dependencies (ring). Rust links musl targets
+# statically by default, so the binary needs no libc from the runtime image.
+apt install -y musl-tools
 
 rustup target add ${CARGO_BUILD_TARGET}
 cargo build --release --target ${CARGO_BUILD_TARGET}
