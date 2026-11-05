@@ -87,8 +87,10 @@ pub struct Config {
     /// (e.g. put.io's "clear completed transfers" removes the transfer while
     /// leaving the file in the folder). Since putioarr normally only discovers
     /// work from `transfers/list`, such files would never be pulled. Any video
-    /// file here with no active transfer that isn't already imported is pulled
-    /// like a normal download (see issue #34). Empty (default) disables this.
+    /// file here that isn't already imported is pulled like a normal download
+    /// and deleted from put.io once the *arr imports it, unless it belongs to
+    /// an active transfer putioarr added (#34, #36). That includes files from
+    /// transfers added on put.io directly. Empty (default) disables this.
     #[serde(default)]
     watch_folders: Vec<i64>,
     /// How often, in seconds, to scan `watch_folders` for orphaned files.

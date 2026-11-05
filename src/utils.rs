@@ -48,8 +48,10 @@ download_unmanaged = false
 # were downloaded but whose transfer record no longer exists (e.g. put.io's
 # "clear completed transfers" removes the transfer but leaves the file). Such
 # files are never surfaced by transfers/list, so they'd otherwise be stranded.
-# Any video file here with no active transfer that isn't already imported is
-# pulled like a normal download. Empty (default) disables this.
+# Any video file here that isn't already imported is pulled like a normal
+# download and deleted from put.io once the *arr imports it, unless it belongs
+# to an active transfer putioarr added. That includes files from transfers you
+# added on put.io yourself. Empty (default) disables this.
 # watch_folders = [123456789]
 
 # Optional. How often (seconds) to scan watch_folders, default 60. Each scan
