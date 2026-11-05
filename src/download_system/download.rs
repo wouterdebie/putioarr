@@ -8,6 +8,7 @@ use file_owner::PathExt;
 use futures::StreamExt;
 use log::{error, info, warn};
 use nix::unistd::Uid;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use std::{fs, path::Path};
 
@@ -69,10 +70,16 @@ async fn download_target(app_data: &Data<AppData>, target: &DownloadTarget) -> R
             }
         }
         TargetType::File => {
+            // Shared per-transfer counter of bytes pulled to local disk, so the
+            // *arr can show second-stage progress (issue #5).
+            let counter = app_data
+                .state
+                .local_byte_counter(&target.transfer_hash)
+                .await;
             // Delete file if already exists
             if !Path::new(&target.to).exists() {
                 info!("{}: download {}", &target, "started".yellow());
-                match fetch(target, app_data.config.uid, &app_data.http).await {
+                match fetch(target, app_data.config.uid, &app_data.http, &counter).await {
                     Ok(_) => info!("{}: download {}", &target, "succeeded".green()),
                     Err(e) => {
                         error!("{}: download {}: {}", &target, "failed".red(), e);
@@ -80,6 +87,12 @@ async fn download_target(app_data: &Data<AppData>, target: &DownloadTarget) -> R
                     }
                 };
             } else {
+                // Already fully downloaded (e.g. a resumed run after the files
+                // were pulled but not yet imported): still count its bytes so the
+                // aggregate progress across the transfer's files stays accurate.
+                if let Ok(m) = fs::metadata(&target.to) {
+                    counter.fetch_add(m.len(), Ordering::Relaxed);
+                }
                 info!("{}: already exists", &target);
             }
         }
@@ -87,8 +100,20 @@ async fn download_target(app_data: &Data<AppData>, target: &DownloadTarget) -> R
     Ok(())
 }
 
-async fn fetch(target: &DownloadTarget, uid: u32, client: &reqwest::Client) -> Result<()> {
+async fn fetch(
+    target: &DownloadTarget,
+    uid: u32,
+    client: &reqwest::Client,
+    counter: &AtomicU64,
+) -> Result<()> {
     let tmp_path = format!("{}.downloading", &target.to);
+
+    // Bytes of *this file* currently reflected in the shared transfer counter.
+    // Tracked across attempts so a resume can account for bytes already on disk
+    // exactly once, and a from-scratch restart (a server that ignores our Range
+    // and returns 200) can undo this file's contribution before re-counting the
+    // re-downloaded bytes (issue #5).
+    let mut counted: u64 = 0;
 
     // Make sure the destination directory exists. A File target can be processed
     // before its parent Directory target, and external cleanup may have removed
@@ -106,7 +131,7 @@ async fn fetch(target: &DownloadTarget, uid: u32, client: &reqwest::Client) -> R
     let mut attempt = 0;
     loop {
         attempt += 1;
-        match fetch_attempt(target, &tmp_path, client).await {
+        match fetch_attempt(target, &tmp_path, client, counter, &mut counted).await {
             Ok(()) => break,
             Err(e) if attempt < MAX_ATTEMPTS => {
                 warn!("{}: download attempt {} failed ({}), resuming", target, attempt, e);
@@ -133,6 +158,8 @@ async fn fetch_attempt(
     target: &DownloadTarget,
     tmp_path: &str,
     client: &reqwest::Client,
+    counter: &AtomicU64,
+    counted: &mut u64,
 ) -> Result<()> {
     let existing = tokio::fs::metadata(tmp_path)
         .await
@@ -167,8 +194,20 @@ async fn fetch_attempt(
     // otherwise it returned the whole file (200), so start it over.
     let resumed = status == reqwest::StatusCode::PARTIAL_CONTENT && existing > 0;
     let mut tmp_file = if resumed {
+        // Count the bytes already on disk exactly once (they aren't re-streamed).
+        if *counted < existing {
+            counter.fetch_add(existing - *counted, Ordering::Relaxed);
+            *counted = existing;
+        }
         tokio::fs::OpenOptions::new().append(true).open(tmp_path).await?
     } else {
+        // Starting over from scratch: the file is about to be truncated, so drop
+        // whatever this file previously added to the counter before re-counting
+        // the re-downloaded bytes below.
+        if *counted > 0 {
+            counter.fetch_sub(*counted, Ordering::Relaxed);
+            *counted = 0;
+        }
         tokio::fs::File::create(tmp_path).await?
     };
 
@@ -176,7 +215,12 @@ async fn fetch_attempt(
     loop {
         match tokio::time::timeout(STREAM_IDLE_TIMEOUT, byte_stream.next()).await {
             Ok(Some(item)) => {
-                tokio::io::copy(&mut item?.as_ref(), &mut tmp_file).await?;
+                let chunk = item?;
+                tokio::io::copy(&mut chunk.as_ref(), &mut tmp_file).await?;
+                // Lock-free running total for progress reporting (issue #5).
+                let n = chunk.len() as u64;
+                counter.fetch_add(n, Ordering::Relaxed);
+                *counted += n;
             }
             Ok(None) => break,
             Err(_) => bail!("stalled: no data received for {:?}", STREAM_IDLE_TIMEOUT),
