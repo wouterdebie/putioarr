@@ -149,7 +149,7 @@ impl From<String> for TransmissionTorrentStatus {
             "SEEDINGWAIT" => Self::SeedingWait,
             "SEEDING" => Self::Seeding,
             _ => {
-                warn!("Status {} unknown. Treating as CheckWait.", &value);
+                warn!("Status {} unknown. Treating as CheckWait.", value);
                 Self::CheckWait
             }
         }

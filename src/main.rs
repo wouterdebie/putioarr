@@ -11,6 +11,7 @@ use figment::{
 use log::{error, info};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::io::IsTerminal;
 use utils::{generate_config, get_token};
 
 mod download_system;
@@ -202,17 +203,12 @@ async fn main() -> Result<()> {
                 .merge(Toml::file(&args.config_path))
                 .extract()?;
 
-            let log_timestamp = if in_container::in_container() {
-                Some(TimestampPrecision::Seconds)
-            } else if let Ok(istty) = nix::unistd::isatty(0) {
-                if istty {
+            let log_timestamp =
+                if in_container::in_container() || std::io::stdin().is_terminal() {
                     Some(TimestampPrecision::Seconds)
                 } else {
                     None
-                }
-            } else {
-                None
-            };
+                };
 
             // User-provided level applies to our crate; noisy HTTP/runtime
             // crates are pinned to `info` so debug logs stay readable.

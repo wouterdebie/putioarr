@@ -174,7 +174,7 @@ async fn watch_for_import(
             // opted to keep downloads (e.g. the *arr copies imports and they
             // want to keep the original).
             if app_data.config.keep_downloads {
-                info!("{}: keeping local download (keep_downloads)", &top_level_target);
+                info!("{}: keeping local download (keep_downloads)", top_level_target);
             } else {
                 // Use async fs and log failures instead of unwrap/panic: a failed
                 // delete (permissions, a concurrent removal, the path already gone)
@@ -189,8 +189,8 @@ async fn watch_for_import(
                     Ok(_) | Err(_) => Ok(()),
                 };
                 match result {
-                    Ok(_) => info!("{}: deleted", &top_level_target),
-                    Err(e) => warn!("{}: failed to delete local copy: {}", &top_level_target, e),
+                    Ok(_) => info!("{}: deleted", top_level_target),
+                    Err(e) => warn!("{}: failed to delete local copy: {}", top_level_target, e),
                 }
             }
             // An orphan has no put.io transfer to remove or seed, so finish it

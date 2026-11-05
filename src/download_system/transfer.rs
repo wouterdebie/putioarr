@@ -92,7 +92,7 @@ impl Transfer {
                 if service_result {
                     info!(
                         "{}: found imported by {}",
-                        &target,
+                        target,
                         app.to_string().bright_blue()
                     );
                 }
@@ -355,11 +355,11 @@ pub async fn produce_transfers(app_data: Data<AppData>, tx: Sender<TransferMessa
             }
             transfer.targets = Some(targets?);
             if transfer.is_imported().await {
-                info!("{}: already imported", &transfer);
+                info!("{}: already imported", transfer);
                 seen.push(transfer.transfer_id);
                 tx.send(TransferMessage::Imported(transfer)).await?;
             } else {
-                info!("{}: not imported yet", &transfer);
+                info!("{}: not imported yet", transfer);
             }
         }
     }

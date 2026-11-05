@@ -66,7 +66,7 @@ pub(crate) async fn rpc_post(
 
 /// Pretty much only used for authentication.
 #[get("/transmission/rpc")]
-async fn rpc_get(req: HttpRequest, app_data: web::Data<AppData>) -> HttpResponse {
+pub(crate) async fn rpc_get(req: HttpRequest, app_data: web::Data<AppData>) -> HttpResponse {
     if validate_user(req, &app_data).await.is_err() {
         return HttpResponse::Forbidden().body("forbidden");
     }
