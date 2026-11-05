@@ -10,7 +10,7 @@ use actix_web::{
 };
 use actix_web_httpauth::headers::authorization::{Authorization, Basic};
 use anyhow::{bail, Context, Result};
-use log::error;
+use log::{error, warn};
 use serde_json::json;
 
 const SESSION_ID: &str = "useless-session-id";
@@ -47,7 +47,11 @@ pub(crate) async fn rpc_post(
                 return HttpResponse::BadRequest().body(e.to_string());
             }
         },
-        _ => panic!("Unknwon method {}", payload.method),
+        "session-stats" => Some(json!({})),
+        _ => {
+            warn!("Unknown method {}", payload.method);
+            None
+        }
     };
 
     let response = TransmissionResponse {

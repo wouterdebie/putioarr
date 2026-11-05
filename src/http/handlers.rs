@@ -60,6 +60,36 @@ fn category_from_labels(
     Some(label.to_string())
 }
 
+/// Normalises a magnet btih to lowercase hex, the form Transmission returns and
+/// put.io reports. A btih is either 40 hex chars or 32 base32 chars (RFC 4648);
+/// anything else is returned lowercased as-is.
+fn normalize_btih(btih: &str) -> String {
+    if btih.len() == 40 && btih.chars().all(|c| c.is_ascii_hexdigit()) {
+        return btih.to_lowercase();
+    }
+    if btih.len() == 32 {
+        let mut hex = String::with_capacity(40);
+        let mut buffer: u32 = 0;
+        let mut bits = 0;
+        for c in btih.chars() {
+            let value = match c.to_ascii_uppercase() {
+                c @ 'A'..='Z' => c as u32 - 'A' as u32,
+                c @ '2'..='7' => c as u32 - '2' as u32 + 26,
+                _ => return btih.to_lowercase(),
+            };
+            // Only the low `bits` bits are pending; mask so the buffer can't overflow.
+            buffer = ((buffer << 5) | value) & 0xffff;
+            bits += 5;
+            if bits >= 8 {
+                bits -= 8;
+                hex.push_str(&format!("{:02x}", (buffer >> bits) & 0xff));
+            }
+        }
+        return hex;
+    }
+    btih.to_lowercase()
+}
+
 pub(crate) async fn handle_torrent_add(
     api_token: &str,
     payload: &web::Json<TransmissionRequest>,
@@ -78,6 +108,7 @@ pub(crate) async fn handle_torrent_add(
 
     let category = category_from_labels(arguments, &app_data.config)
         .unwrap_or_else(|| determine_category(&download_dir, &app_data.config));
+    let mut added: Option<(String, String)> = None;
     if arguments.contains_key("metainfo") {
         // .torrent files
         let b64 = arguments["metainfo"].as_str().unwrap();
@@ -89,6 +120,7 @@ pub(crate) async fn handle_torrent_add(
         match Torrent::read_from_bytes(bytes) {
             Ok(t) => {
                 let hash = t.info_hash();
+                added = Some((hash.to_lowercase(), t.name.clone()));
                 let full_download_dir = if category != "default" {
                     format!("{}/{}", app_data.config.download_directory, category)
                 } else {
@@ -118,7 +150,13 @@ pub(crate) async fn handle_torrent_add(
         match Magnet::new(magnet_url) {
             Ok(m) => {
                 if let Some(xt) = &m.xt {
-                    let hash = xt.strip_prefix("urn:btih:").unwrap_or(xt);
+                    let hash = normalize_btih(xt.strip_prefix("urn:btih:").unwrap_or(xt));
+                    let name = m
+                        .dn
+                        .as_ref()
+                        .map(|dn| urldecode::decode(dn.clone()))
+                        .unwrap_or_else(|| hash.to_string());
+                    added = Some((hash.clone(), name));
                     let full_download_dir = if category != "default" {
                         format!("{}/{}", app_data.config.download_directory, category)
                     } else {
@@ -126,10 +164,10 @@ pub(crate) async fn handle_torrent_add(
                     };
                     info!(
                         "torrent-add (magnet): storing state for hash={} category={} dir={}",
-                        hash.to_lowercase(), category, full_download_dir
+                        hash, category, full_download_dir
                     );
                     app_data.state.add_transfer(
-                        hash.to_lowercase(),
+                        hash,
                         category.clone(),
                         full_download_dir
                     ).await?;
@@ -154,7 +192,9 @@ pub(crate) async fn handle_torrent_add(
             }
         }
     };
-    Ok(None)
+    Ok(added.map(|(hash, name)| {
+        json!({ "torrent-added": { "id": 0, "hashString": hash, "name": name } })
+    }))
 }
 
 pub(crate) async fn handle_torrent_remove(
@@ -386,6 +426,7 @@ pub(crate) async fn handle_torrent_get(
             seconds_downloading: 0,
             error_string: None,
             downloaded_ever,
+            percent_done: 0.0,
             seed_ratio_limit: 0.0,
             seed_ratio_mode: 0,
             seed_idle_limit: 0,
@@ -401,10 +442,55 @@ pub(crate) async fn handle_torrent_get(
         app_data.state.retain_local_bytes(&active_hashes).await;
     }
 
+    for t in transmission_transfers.iter_mut() {
+        t.percent_done = if t.is_finished
+            && (t.left_until_done == 0
+                || matches!(
+                    t.status,
+                    TransmissionTorrentStatus::Seeding | TransmissionTorrentStatus::SeedingWait
+                )) {
+            1.0
+        } else if t.total_size > 0 {
+            ((t.total_size - t.left_until_done).max(0) as f64 / t.total_size as f64).min(0.999)
+        } else {
+            0.0
+        };
+    }
+
     let torrents = json!(transmission_transfers);
 
     let mut arguments = serde_json::Map::new();
     arguments.insert(String::from("torrents"), torrents);
 
     Some(json!(arguments))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Info hash from the Big Buck Bunny WebTorrent magnet, and its base32 form.
+    const HEX: &str = "dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c";
+    const BASE32: &str = "3WBFL3G4PSSV7MF37AJSHWDQMLNR63I4";
+
+    #[test]
+    fn normalize_btih_lowercases_hex() {
+        assert_eq!(normalize_btih("DD8255ecdc7CA55FB0bbf81323D87062db1f6d1C"), HEX);
+    }
+
+    #[test]
+    fn normalize_btih_decodes_base32() {
+        assert_eq!(normalize_btih(BASE32), HEX);
+        assert_eq!(normalize_btih(&BASE32.to_lowercase()), HEX);
+    }
+
+    #[test]
+    fn normalize_btih_passes_through_invalid() {
+        assert_eq!(normalize_btih("Not-A-Hash"), "not-a-hash");
+        // Right length for base32 but contains '1', which isn't in the alphabet.
+        assert_eq!(
+            normalize_btih("1WBFL3G4PSSV7MF37AJSHWDQMLNR63I4"),
+            "1wbfl3g4pssv7mf37ajshwdqmlnr63i4"
+        );
+    }
 }
