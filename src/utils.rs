@@ -130,7 +130,7 @@ struct Context {
 }
 
 pub async fn generate_config(config_path: &str) -> Result<()> {
-    println!("Generating config {}", &config_path);
+    println!("Generating config {}", config_path);
     let putio_api_key = get_token().await?;
 
     let mut tt = TinyTemplate::new();
@@ -141,10 +141,10 @@ pub async fn generate_config(config_path: &str) -> Result<()> {
     let rendered = tt.render("config", &context)?;
 
     if Path::new(&config_path).exists() {
-        println!("Backing up config {}", &config_path);
-        fs::rename(config_path, format!("{}.bak", &config_path))?;
+        println!("Backing up config {}", config_path);
+        fs::rename(config_path, format!("{}.bak", config_path))?;
     }
-    println!("Writing {}", &config_path);
+    println!("Writing {}", config_path);
     let mut file = fs::File::create(config_path)?;
     file.write_all(rendered.as_bytes())?;
     file.flush()?;

@@ -169,6 +169,7 @@ impl Display for Transfer {
     }
 }
 
+#[allow(clippy::double_must_use)] // the #[must_use] comes from #[async_recursion]
 #[async_recursion]
 async fn recurse_download_targets(
     app_data: &Data<AppData>,
