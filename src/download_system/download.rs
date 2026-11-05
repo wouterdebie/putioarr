@@ -106,7 +106,7 @@ async fn fetch(
     client: &reqwest::Client,
     counter: &AtomicU64,
 ) -> Result<()> {
-    let tmp_path = format!("{}.downloading", &target.to);
+    let tmp_path = format!("{}.downloading", target.to);
 
     // Bytes of *this file* currently reflected in the shared transfer counter.
     // Tracked across attempts so a resume can account for bytes already on disk
