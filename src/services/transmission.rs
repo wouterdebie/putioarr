@@ -20,7 +20,7 @@ pub struct TransmissionRequest {
 #[derive(Serialize, Debug)]
 pub struct TransmissionConfig {
     #[serde(rename(serialize = "rpc-version"))]
-    pub rpc_version: String,
+    pub rpc_version: u32,
     #[serde(default)]
     pub version: String,
     #[serde(rename(serialize = "download-dir"))]
@@ -38,7 +38,7 @@ pub struct TransmissionConfig {
 impl Default for TransmissionConfig {
     fn default() -> Self {
         TransmissionConfig {
-            rpc_version: String::from("18"),
+            rpc_version: 18,
             version: String::from("14.0.0"),
             download_dir: String::from("/"),
             seed_ratio_limit: 1.0,
@@ -53,6 +53,7 @@ impl Default for TransmissionConfig {
 #[serde(rename_all = "camelCase")]
 pub struct TransmissionTorrent {
     pub id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub hash_string: Option<String>,
     pub name: String,
     pub download_dir: String,
@@ -62,8 +63,10 @@ pub struct TransmissionTorrent {
     pub eta: i64,
     pub status: TransmissionTorrentStatus,
     pub seconds_downloading: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub error_string: Option<String>,
     pub downloaded_ever: i64,
+    pub percent_done: f64,
     pub seed_ratio_limit: f32,
     pub seed_ratio_mode: u32,
     pub seed_idle_limit: u64,
@@ -108,6 +111,7 @@ impl From<PutIOTransfer> for TransmissionTorrent {
             // reflects a real, current problem.
             error_string: if is_finished { None } else { t.error_message },
             downloaded_ever: t.downloaded.unwrap_or(0),
+            percent_done: 0.0,
             seed_ratio_limit: 0.0,
             seed_ratio_mode: 0,
             seed_idle_limit: 0,
@@ -117,7 +121,7 @@ impl From<PutIOTransfer> for TransmissionTorrent {
     }
 }
 
-#[derive(Debug, Serialize, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TransmissionTorrentStatus {
     Stopped = 0,
     CheckWait = 1,
@@ -126,6 +130,12 @@ pub enum TransmissionTorrentStatus {
     Downloading = 4,
     SeedingWait = 5,
     Seeding = 6,
+}
+
+impl Serialize for TransmissionTorrentStatus {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_u8(*self as u8)
+    }
 }
 
 impl From<String> for TransmissionTorrentStatus {
