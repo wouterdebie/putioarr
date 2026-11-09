@@ -10,6 +10,13 @@ updates:
         update-types:
           - minor
           - patch
+    ignore:
+      # magnet-url 3 keeps only the last xt= of a magnet, so on hybrid v1+v2
+      # magnets it returns the btmh hash and loses the btih that put.io
+      # reports (see #48). Stay on 2.x.
+      - dependency-name: magnet-url
+        update-types:
+          - version-update:semver-major
 
   - package-ecosystem: github-actions
     directory: /
