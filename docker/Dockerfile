@@ -31,7 +31,7 @@ RUN TARGETPLATFORM=$TARGETPLATFORM TARGETARCH=$TARGETARCH /usr/local/bin/build.s
 
 ### Runtime
 
-FROM ghcr.io/linuxserver/baseimage-alpine:edge
+FROM ghcr.io/linuxserver/baseimage-alpine:3.24
 ARG TARGETPLATFORM
 ARG TARGETARCH
 

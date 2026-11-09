@@ -66,7 +66,7 @@ async fn download_target(app_data: &Data<AppData>, target: &DownloadTarget) -> R
                 if Uid::effective().is_root() {
                     target.to.clone().set_owner(app_data.config.uid)?;
                 }
-                info!("{}: directory created", &target);
+                info!("{}: directory created", target);
             }
         }
         TargetType::File => {
@@ -78,11 +78,11 @@ async fn download_target(app_data: &Data<AppData>, target: &DownloadTarget) -> R
                 .await;
             // Delete file if already exists
             if !Path::new(&target.to).exists() {
-                info!("{}: download {}", &target, "started".yellow());
+                info!("{}: download {}", target, "started".yellow());
                 match fetch(target, app_data.config.uid, &app_data.http, &counter).await {
-                    Ok(_) => info!("{}: download {}", &target, "succeeded".green()),
+                    Ok(_) => info!("{}: download {}", target, "succeeded".green()),
                     Err(e) => {
-                        error!("{}: download {}: {}", &target, "failed".red(), e);
+                        error!("{}: download {}: {}", target, "failed".red(), e);
                         bail!(e)
                     }
                 };
@@ -93,7 +93,7 @@ async fn download_target(app_data: &Data<AppData>, target: &DownloadTarget) -> R
                 if let Ok(m) = fs::metadata(&target.to) {
                     counter.fetch_add(m.len(), Ordering::Relaxed);
                 }
-                info!("{}: already exists", &target);
+                info!("{}: already exists", target);
             }
         }
     }

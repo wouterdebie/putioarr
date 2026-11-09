@@ -1,0 +1,17 @@
+# Configuration for `cargo deny check advisories`, which CI runs on every
+# pull request and push to main.
+
+[graph]
+# Only the platforms putioarr is built for (the Docker images) and developed
+# on. This keeps Windows-only dependencies of in-container out of the audit.
+targets = [
+    "x86_64-unknown-linux-musl",
+    "aarch64-unknown-linux-musl",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-apple-darwin",
+]
+
+[advisories]
+ignore = [
+    { id = "RUSTSEC-2025-0058", reason = "custom_derive is unmaintained; it is a macro-only crate pulled in by lava_torrent -> conv, and lava_torrent has no newer release" },
+]
