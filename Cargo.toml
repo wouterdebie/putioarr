@@ -28,7 +28,7 @@ futures = "0.3.28"
 in-container = { version = "1.1.0", default-features = false }
 lava_torrent = "0.11.1"
 log = "0.4.20"
-magnet-url = "2.0.0"
+magnet-url = "3.0.0"
 nix = { version = "0.31", features = ["fs", "user"] }
 reqwest = { version = "0.12.3", default-features = false, features = [
     "json",
