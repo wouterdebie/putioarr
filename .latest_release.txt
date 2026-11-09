@@ -1,24 +1,20 @@
-# 0.6.8
+# 0.6.9
+
+Security
+- Update dependencies, fixing all 31 RustSec advisories that applied to
+  0.6.8. They include request smuggling and memory exhaustion in
+  actix-web/actix-http (RUSTSEC-2026-0446, -0447, -0448, -0455) (#47)
 
 Docker image
-- Fix the arm64 image, which exited on start with "Error relocating
-  /usr/bin/putioarr: __res_init: symbol not found" (#42)
-- The binary is now statically linked, so the image no longer installs
-  gcompat or gcc (#44)
-
-Fixes
-- A transfer with nothing to download, such as a RAR-only release, is no
-  longer treated as imported and deleted from put.io (#45)
-- Don't forward a stale put.io error message once a transfer has finished,
-  which stopped the *arr from importing it (#40)
-- Watch folders now also pull files from active transfers putioarr didn't
-  add (#36)
-- A failed delete of a local download after import no longer crashes
-  putioarr (#39)
+- Built on the stable Alpine 3.24 base image instead of Alpine edge (#47)
 
 New
-- Download progress covers both stages: put.io's download is 0-50% and the
-  local download 50-100%, in the *arr and in the logs (#37, closes #5)
-- keep_downloads option to keep local files after the *arr imports them (#39)
-- The category can come from Transmission labels, for clients such as
-  Sportarr (#43)
+- Support Sportarr and other Transmission clients that follow the RPC spec
+  strictly: numeric rpc-version and torrent status, percentDone, the added
+  torrent in the torrent-add reply, and session-stats (#46)
+- Magnets with a base32 info hash keep their category, because the hash is
+  now converted to the hex form put.io reports (#46)
+
+Fixes
+- An unknown RPC method is logged as a warning instead of crashing the
+  request handler (#46)
