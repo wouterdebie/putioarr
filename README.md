@@ -199,27 +199,35 @@ Click **Test**; it should turn green. Then **Save**.
 
 Repeat for each \*arr, using that \*arr's category.
 
-> **Important — shared download path.** The \*arr imports a completed download by
-> reading the files from disk itself, so it must be able to see the files
-> putioarr downloaded, **at the same path**. In other words
-> `download_directory` in putioarr and the path the \*arr looks in must resolve
-> to the same files. The easiest way is to mount the *same* host directory into
-> both containers at the same path (e.g. `/downloads` in putioarr and
-> `/downloads` in Sonarr/Radarr). If the paths differ, add a **Remote Path
-> Mapping** in the \*arr (Settings → Download Clients → Remote Path Mappings) so
-> it can translate putioarr's path to where the \*arr sees it. Without this the
-> download completes and is cleaned up, but nothing is ever imported.
+> **Important — same download path in both containers.** The \*arr imports a
+> completed download by reading the files from disk itself, and putioarr only
+> cleans up once it finds that import in the \*arr's history under its own
+> path. So the \*arr must see the files putioarr downloaded **at the same
+> path**: mount the *same* host directory into both containers at the same
+> place (e.g. `/downloads` in putioarr and `/downloads` in Sonarr/Radarr), and
+> set `download_directory` to that path. A **Remote Path Mapping** in the \*arr
+> is not a substitute: the \*arr will import, but it records the import under
+> its own path, so putioarr never sees it and never cleans up the local files
+> or the put.io transfer.
 
 ## Troubleshooting
 
-**putioarr downloads (and deletes) the files, but nothing is imported into
-Sonarr/Radarr.**
+**Downloads finish, but nothing is imported and the files stay in
+`download_directory`.**
 This is almost always a path problem: the \*arr can't find the files putioarr
 downloaded because it's looking at a different path (or doesn't have the volume
-mounted at all). Make sure the download directory is mounted into both
-containers at the same path, or configure a Remote Path Mapping — see *Connecting
-Sonarr/Radarr/Whisparr* above. Confirm the \*arr can actually list the files at
-`download_directory` (or its mapped equivalent).
+mounted at all). The \*arr's Activity → Queue usually shows a warning for the
+download. Make sure the download directory is mounted into both containers at
+the same path — see *Connecting Sonarr/Radarr/Whisparr* above — and confirm the
+\*arr can list the files there. putioarr leaves the files alone until it sees
+the import. After `import_timeout_secs` (2 hours by default) it logs "still not
+imported … giving up watching" and stops checking that download.
+
+**Downloads are imported, but the files stay in `download_directory` and on
+put.io.**
+putioarr didn't recognize the import. The usual cause is a Remote Path Mapping
+or a different mount path in the \*arr, so the \*arr records the import under
+a path putioarr doesn't know. Use the same path in both containers instead.
 
 **The download client tests fine but grabs never appear on put.io.**
 Check that the \*arr is sending grabs to putioarr (the Activity → Queue in the
@@ -231,8 +239,8 @@ Set a distinct `category` per \*arr in putioarr's config *and* the matching
 Category in each \*arr's Transmission settings. See *Category-based Download
 Directories* above.
 
-**Nothing happens / no logs.** Raise the log level (`loglevel = "debug"` in the
-config, or run with `RUST_LOG=debug`) to see what putioarr is doing.
+**Nothing happens / no logs.** Raise the log level with `loglevel = "debug"` in
+the config to see what putioarr is doing.
 
 ## TODO:
 - Better Error handling and retry behavior
