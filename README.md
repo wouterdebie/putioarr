@@ -184,6 +184,69 @@ To prevent Sonarr/Radarr/Whisparr from seeing each other's downloads, you can co
 
 This feature ensures each *arr application only sees and processes its own downloads.
 
+## Connecting Sonarr/Radarr/Whisparr
+
+putioarr pretends to be a Transmission client, so you add it in the \*arr just
+like a real Transmission instance.
+
+In **Settings → Download Clients → Add → Transmission**, set:
+
+| Field | Value |
+| --- | --- |
+| Host | the host running putioarr (e.g. `putioarr` if on the same Docker network, or its IP) |
+| Port | `9091` (or your configured `port`) |
+| URL Base | `/transmission` |
+| Username | the `username` from your config |
+| Password | the `password` from your config |
+| Category | the category for this \*arr, if you set one (e.g. `tv` for Sonarr, `movies` for Radarr) — must match the `category` in putioarr's config |
+
+Click **Test**; it should turn green. Then **Save**.
+
+Repeat for each \*arr, using that \*arr's category.
+
+> **Important — same download path in both containers.** The \*arr imports a
+> completed download by reading the files from disk itself, and putioarr only
+> cleans up once it finds that import in the \*arr's history under its own
+> path. So the \*arr must see the files putioarr downloaded **at the same
+> path**: mount the *same* host directory into both containers at the same
+> place (e.g. `/downloads` in putioarr and `/downloads` in Sonarr/Radarr), and
+> set `download_directory` to that path. A **Remote Path Mapping** in the \*arr
+> is not a substitute: the \*arr will import, but it records the import under
+> its own path, so putioarr never sees it and never cleans up the local files
+> or the put.io transfer.
+
+## Troubleshooting
+
+**Downloads finish, but nothing is imported and the files stay in
+`download_directory`.**
+This is almost always a path problem: the \*arr can't find the files putioarr
+downloaded because it's looking at a different path (or doesn't have the volume
+mounted at all). The \*arr's Activity → Queue usually shows a warning for the
+download. Make sure the download directory is mounted into both containers at
+the same path — see *Connecting Sonarr/Radarr/Whisparr* above — and confirm the
+\*arr can list the files there. putioarr leaves the files alone until it sees
+the import. After `import_timeout_secs` (2 hours by default) it logs "still not
+imported … giving up watching" and stops checking that download.
+
+**Downloads are imported, but the files stay in `download_directory` and on
+put.io.**
+putioarr didn't recognize the import. The usual cause is a Remote Path Mapping
+or a different mount path in the \*arr, so the \*arr records the import under
+a path putioarr doesn't know. Use the same path in both containers instead.
+
+**The download client tests fine but grabs never appear on put.io.**
+Check that the \*arr is sending grabs to putioarr (the Activity → Queue in the
+\*arr) and watch putioarr's logs — every grab logs an "uploaded" line. Make sure
+the `[putio] api_key` is valid (regenerate with `putioarr get-token`).
+
+**Downloads go to the wrong folder / one \*arr imports another's downloads.**
+Set a distinct `category` per \*arr in putioarr's config *and* the matching
+Category in each \*arr's Transmission settings. See *Category-based Download
+Directories* above.
+
+**Nothing happens / no logs.** Raise the log level with `loglevel = "debug"` in
+the config to see what putioarr is doing.
+
 ## TODO:
 - Figure out a better way to map a transfer to a completed import. Since a transfer can contain multiple files (e.g. a whole season) we currently check if all video files have been imported. Most of the time this is fine, except when there are sample videos. sonarr/radarr/whisparr will not import samples, but will make no mention of the fact that the sample was skipped. Right now we check against the `skip_directories` list, which works, but might be tedious.
 - Automatically pick the right putio proxy based on speed
