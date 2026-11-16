@@ -91,11 +91,11 @@ pub struct Config {
     /// the local files; put.io transfers/files are still cleaned up as usual.
     #[serde(default)]
     keep_downloads: bool,
-    /// When true, also download ARCHIVE files (e.g. multi-volume RAR releases)
-    /// and hand them to an external extractor such as Unpackerr. Completion is
-    /// then detected either by the archive parts disappearing from disk
-    /// (extractor cleanup) or by the *arr importing a file from the transfer's
-    /// directory. When false (default), archives are skipped as before.
+    /// When true, also download archives (put.io type ARCHIVE: RAR parts, zip,
+    /// 7z) and leave them to an external extractor such as Unpackerr. An
+    /// archive then counts as imported once it's gone from disk (extractor
+    /// cleanup), or once the *arr imports a file from the transfer's own
+    /// folder. When false (default), archives are skipped.
     #[serde(default)]
     download_archives: bool,
     /// put.io folder ids to additionally scan for *orphaned* completed files:

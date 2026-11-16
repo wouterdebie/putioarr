@@ -135,10 +135,9 @@ download_workers = 4
 # (put.io transfers/files are still cleaned up).
 keep_downloads = false
 
-# Optional, default false. When true, multi-volume RAR releases (put.io file
-# type ARCHIVE) are downloaded like any other file instead of being skipped.
-# Pair with an external extractor such as Unpackerr pointed at
-# download_directory -- see "Archive / RAR support" below.
+# Optional, default false. When true, archives (put.io type ARCHIVE: RAR parts,
+# zip, 7z) are downloaded too, for an extractor such as Unpackerr pointed at
+# download_directory -- see "Archives (Unpackerr integration)" below.
 download_archives = false
 
 [putio]
@@ -168,26 +167,27 @@ api_key = "MYWHISPARRAPIKEY"
 # category = "adult"
 ```
 
-### Archive / RAR support (Unpackerr integration)
+### Archives (Unpackerr integration)
 
-By default, putioarr only downloads `VIDEO`/`AUDIO` files. Multi-volume RAR
-releases (`.rar`/`.r00`/`.r01`/...) are skipped entirely -- and because a
-transfer with nothing downloadable was previously (incorrectly) treated as
-already imported, such transfers used to vanish with **nothing ever
-downloaded** and no error.
+By default, putioarr only downloads video and audio files. Archives (put.io type
+`ARCHIVE`: multi-volume RAR releases with `.rar`/`.r00`/`.r01`/... parts, `.zip`,
+`.7z`) are skipped. A transfer that contains only archives stays on put.io, and
+putioarr logs a warning, since the \*arr has nothing to import.
 
-Set `download_archives = true` to change this: putioarr downloads the RAR
-parts like any other file, and waits for something else -- typically
-[Unpackerr](https://github.com/Unpackerr/unpackerr) watching the same
-`download_directory` -- to extract them. putioarr detects completion once
-either:
-- the archive parts are gone from disk (e.g. Unpackerr's `delete_orig`), or
-- the *arr reports a `downloadFolderImported` history event for a file
-  inside that transfer's directory (the extracted video).
+Set `download_archives = true` to download archives like any other file and
+leave them to an extractor, typically
+[Unpackerr](https://github.com/Unpackerr/unpackerr), set up for the same
+`download_directory`. putioarr considers an archive done once either:
+- it is gone from disk (e.g. with Unpackerr's `delete_orig`), or
+- the \*arr reports importing a file from inside the transfer's own folder (the
+  extracted video).
+
+A transfer that is a single archive file, not in a folder, only counts as done
+once the archive is gone from disk.
 
 Only enable this if you run an extractor pointed at the same download
-directory; otherwise the RAR parts will sit there until `import_timeout_secs`
-is reached.
+directory; otherwise the archives sit there until `import_timeout_secs` is
+reached.
 
 ### Category-based Download Directories
 

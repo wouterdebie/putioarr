@@ -120,7 +120,10 @@ impl ArrApp {
 
     /// Shared history scan: returns true when any import event's droppedPath
     /// satisfies `matches`.
-    async fn check_imported_matching(&self, matches: &(dyn Fn(&str) -> bool + Sync)) -> Result<bool> {
+    async fn check_imported_matching(
+        &self,
+        matches: &(dyn Fn(&str) -> bool + Sync),
+    ) -> Result<bool> {
         let client = reqwest::Client::new();
         let mut inspected = 0;
         let mut page = 0;
