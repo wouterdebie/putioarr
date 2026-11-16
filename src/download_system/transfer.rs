@@ -55,14 +55,76 @@ impl Transfer {
         // With no files to check, `all()` below is vacuously true, and the
         // transfer's local folder and put.io copy get deleted as "imported".
         // That happens when a transfer has only files putioarr doesn't download,
-        // such as a RAR release (put.io type ARCHIVE). Nothing was downloaded,
-        // so nothing can have been imported.
+        // such as a RAR release (put.io type ARCHIVE) with download_archives
+        // off. Nothing was downloaded, so nothing can have been imported.
         if targets.is_empty() {
             return false;
         }
 
+        // The transfer's own folder, if it is a folder rather than a single file.
+        let transfer_dir = self
+            .targets
+            .as_ref()
+            .unwrap()
+            .iter()
+            .find(|t| t.top_level && t.target_type == TargetType::Directory)
+            .map(|t| t.to.clone());
+
         let mut results = Vec::<bool>::new();
+        // Archive parts in the same transfer folder share one history lookup.
+        let mut dir_import_cache = std::collections::HashMap::<String, bool>::new();
         for target in targets {
+            // The *arr never imports archive parts (put.io type ARCHIVE, only
+            // downloaded with download_archives), only the file an extractor
+            // such as Unpackerr unpacks from them, so they never show up in
+            // its history under their own path. An archive counts as imported
+            // once it's gone from disk (Unpackerr's delete_orig), or once the
+            // *arr imported something from this transfer's folder.
+            if target.media_type == Some(MediaType::Archive) {
+                if !Path::new(&target.to).exists() {
+                    info!("{}: archive gone (extracted)", target);
+                    results.push(true);
+                    continue;
+                }
+                // A transfer that is a single archive file has no folder of its
+                // own. Its parent is the category or download directory, which
+                // nearly every import's path contains, so only its removal can
+                // tell us it was extracted.
+                let Some(dir) = archive_import_dir(&target, transfer_dir.as_deref()) else {
+                    results.push(false);
+                    continue;
+                };
+                if let Some(hit) = dir_import_cache.get(&dir) {
+                    results.push(*hit);
+                    continue;
+                }
+                let mut dir_imported = false;
+                for app in &apps {
+                    match app.check_imported_dir(&dir).await {
+                        Ok(true) => {
+                            dir_imported = true;
+                            break;
+                        }
+                        Ok(false) => {}
+                        Err(e) => {
+                            if self.app_data.state.should_log_arr_error(&app.name).await {
+                                error!(
+                                    "Error retrieving history from {} (suppressing repeats for {:?}): {}",
+                                    app,
+                                    crate::state::StateManager::ARR_ERROR_LOG_INTERVAL,
+                                    e
+                                );
+                            }
+                        }
+                    }
+                }
+                if dir_imported {
+                    info!("{}: archive extracted and imported from {}", target, dir);
+                }
+                dir_import_cache.insert(dir, dir_imported);
+                results.push(dir_imported);
+                continue;
+            }
             let mut service_results = vec![];
             for app in &apps {
                 // Only ask an *arr about files matching its media type.
@@ -245,6 +307,20 @@ async fn recurse_download_targets(
                 media_type: MediaType::from_putio(response.parent.file_type.as_str()),
             });
         }
+        // Archives (.rar parts, .zip, .7z) only when download_archives is on.
+        // An extractor such as Unpackerr unpacks them for the *arr; see
+        // is_imported for how putioarr then decides they're done.
+        "ARCHIVE" if app_data.config.download_archives => {
+            let url = putio::url(&app_data.config.putio.api_key, response.parent.id).await?;
+            targets.push(DownloadTarget {
+                from: Some(url),
+                target_type: TargetType::File,
+                to,
+                top_level,
+                transfer_hash: hash.to_string(),
+                media_type: MediaType::from_putio(response.parent.file_type.as_str()),
+            });
+        }
         other => {
             debug!(
                 "{}: skipping file type {}",
@@ -254,6 +330,19 @@ async fn recurse_download_targets(
     }
 
     Ok(targets)
+}
+
+/// The folder name to look for in the *arr's import history for an archive
+/// target: the name of the transfer's own top-level folder, when the archive is
+/// inside it. `None` when the transfer is a single archive file. Only the name
+/// is compared, so an archive deeper down (e.g. in `CD1/`) still matches the
+/// release folder rather than a generic subfolder name.
+fn archive_import_dir(target: &DownloadTarget, transfer_dir: Option<&str>) -> Option<String> {
+    let dir = Path::new(transfer_dir?);
+    if !Path::new(&target.to).starts_with(dir) {
+        return None;
+    }
+    dir.file_name().map(|n| n.to_string_lossy().into_owned())
 }
 
 #[derive(Clone)]
@@ -267,6 +356,12 @@ pub enum TransferMessage {
 pub enum MediaType {
     Audio,
     Video,
+    /// Multi-volume RAR parts (put.io file_type ARCHIVE).
+    /// Tracked separately from Video so is_imported() can use a different
+    /// completion check (local file presence, since the *arr never reports
+    /// a downloadFolderImported history event for a .rNN/.rar path -- only
+    /// for the video file Unpackerr extracts from it).
+    Archive,
 }
 
 impl MediaType {
@@ -274,6 +369,7 @@ impl MediaType {
         match file_type {
             "AUDIO" => Some(Self::Audio),
             "VIDEO" => Some(Self::Video),
+            "ARCHIVE" => Some(Self::Archive),
             _ => None,
         }
     }
@@ -677,6 +773,44 @@ mod tests {
         let mut t = Transfer::from_orphan(app_data(), 1, "Some.Release".to_string());
         t.targets = Some(vec![target(TargetType::Directory, "/downloads/Some.Release")]);
         assert!(!t.is_imported().await);
+    }
+
+    fn archive(to: &str, top_level: bool) -> DownloadTarget {
+        DownloadTarget {
+            top_level,
+            media_type: Some(MediaType::Archive),
+            ..target(TargetType::File, to)
+        }
+    }
+
+    #[test]
+    fn archive_in_a_folder_matches_on_the_transfer_folder() {
+        let dir = Some("/downloads/movies/Some.Release");
+        let release = Some("Some.Release");
+        let part = archive("/downloads/movies/Some.Release/release.part01.rar", false);
+        assert_eq!(archive_import_dir(&part, dir).as_deref(), release);
+        // Deeper down it still matches the release folder, not "CD1".
+        let part = archive("/downloads/movies/Some.Release/CD1/cd1.rar", false);
+        assert_eq!(archive_import_dir(&part, dir).as_deref(), release);
+    }
+
+    #[test]
+    fn lone_archive_has_no_folder_to_match() {
+        // A single-file transfer: its parent is the category folder ("movies"),
+        // which almost every import path contains.
+        let lone = archive("/downloads/movies/some.release.zip", true);
+        assert_eq!(archive_import_dir(&lone, None), None);
+    }
+
+    #[actix_rt::test]
+    async fn archive_counts_as_imported_only_once_it_is_gone() {
+        let path = std::env::temp_dir().join(format!("putioarr-test-{}.zip", std::process::id()));
+        std::fs::write(&path, b"zip").unwrap();
+        let mut t = Transfer::from_orphan(app_data(), 1, "some.release.zip".to_string());
+        t.targets = Some(vec![archive(path.to_str().unwrap(), true)]);
+        assert!(!t.is_imported().await);
+        std::fs::remove_file(&path).unwrap();
+        assert!(t.is_imported().await);
     }
 
     #[actix_rt::test]

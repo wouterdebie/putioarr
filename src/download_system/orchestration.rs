@@ -94,8 +94,9 @@ impl Worker {
         // put.io copy stays.
         if !targets.iter().any(|t| t.target_type == TargetType::File) {
             warn!(
-                "{}: no video or audio files to download (archives only?); the *arr won't \
-                 find anything to import, so it stays on put.io",
+                "{}: no video or audio files to download (archives only? see \
+                 download_archives); the *arr won't find anything to import, so it stays \
+                 on put.io",
                 t
             );
         }

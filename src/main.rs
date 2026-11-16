@@ -91,6 +91,13 @@ pub struct Config {
     /// the local files; put.io transfers/files are still cleaned up as usual.
     #[serde(default)]
     keep_downloads: bool,
+    /// When true, also download archives (put.io type ARCHIVE: RAR parts, zip,
+    /// 7z) and leave them to an external extractor such as Unpackerr. An
+    /// archive then counts as imported once it's gone from disk (extractor
+    /// cleanup), or once the *arr imports a file from the transfer's own
+    /// folder. When false (default), archives are skipped.
+    #[serde(default)]
+    download_archives: bool,
     /// put.io folder ids to additionally scan for *orphaned* completed files:
     /// files that were downloaded but whose transfer record no longer exists
     /// (e.g. put.io's "clear completed transfers" removes the transfer while

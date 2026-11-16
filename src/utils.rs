@@ -49,6 +49,11 @@ download_unmanaged = false
 # transfers/files are still cleaned up as usual).
 keep_downloads = false
 
+# Optional, default false. When true, archives (put.io type ARCHIVE: RAR parts,
+# zip, 7z) are downloaded too, for an extractor such as Unpackerr pointed at
+# download_directory to unpack. Only enable this if you run one.
+download_archives = false
+
 # Optional. put.io folder ids to scan for *orphaned* completed files: files that
 # were downloaded but whose transfer record no longer exists (e.g. put.io's
 # "clear completed transfers" removes the transfer but leaves the file). Such
