@@ -1,20 +1,13 @@
-# 0.6.9
-
-Security
-- Update dependencies, fixing all 31 RustSec advisories that applied to
-  0.6.8. They include request smuggling and memory exhaustion in
-  actix-web/actix-http (RUSTSEC-2026-0446, -0447, -0448, -0455) (#47)
-
-Docker image
-- Built on the stable Alpine 3.24 base image instead of Alpine edge (#47)
+# 0.6.10
 
 New
-- Support Sportarr and other Transmission clients that follow the RPC spec
-  strictly: numeric rpc-version and torrent status, percentDone, the added
-  torrent in the torrent-add reply, and session-stats (#46)
-- Magnets with a base32 info hash keep their category, because the hash is
-  now converted to the hex form put.io reports (#46)
+- download_archives option, off by default: also download archives (RAR
+  parts, zip, 7z) for an extractor such as Unpackerr to unpack. An archive
+  counts as imported once it's gone from disk, or once the *arr imports a
+  file from the transfer's own folder (#41)
 
-Fixes
-- An unknown RPC method is logged as a warning instead of crashing the
-  request handler (#46)
+Docs
+- README guide to connecting Sonarr/Radarr/Whisparr, and a Troubleshooting
+  section. The download directory must be mounted at the same path in
+  putioarr and the *arr; a Remote Path Mapping stops putioarr from cleaning
+  up (#38, closes #4)
