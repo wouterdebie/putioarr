@@ -1,5 +1,12 @@
-# 0.6.11
+# 0.6.12
 
-Docs
-- README: the usage section now names the right command,
-  `putioarr generate-config` instead of `putio generate-config` (#50)
+Security
+- actix-http 3.22.0, which fixes three advisories in the HTTP server that
+  Sonarr/Radarr/Whisparr talk to: a stalled keep-alive request could hold a
+  connection open forever, and malformed chunked bodies could end a request
+  early or swallow the next one (RUSTSEC-2026-0552, -0553, -0554)
+
+Changed
+- chrono is replaced with jiff, as chrono is no longer maintained
+  (RUSTSEC-2026-0543). A put.io start time that doesn't parse now counts as
+  0 seconds downloading instead of crashing
