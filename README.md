@@ -12,7 +12,7 @@ Make sure you have a [proper rust installation](https://www.rust-lang.org/tools/
 
 #### Usage
 
-First, generate a config using `putio generate-config`. This will generate a config file in `~/.config/putioarr/config.toml`. Use `-c` to override the configuration file location.
+First, generate a config using `putioarr generate-config`. This will generate a config file in `~/.config/putioarr/config.toml`. Use `-c` to override the configuration file location.
 
 Edit the configuration file and make sure you configure the username and password, as well as the sonarr/radarr/whisparr details.
 
