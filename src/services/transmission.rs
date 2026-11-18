@@ -1,4 +1,4 @@
-use chrono::prelude::*;
+use jiff::{civil, tz::TimeZone, Timestamp};
 use log::warn;
 use serde::{Deserialize, Serialize};
 use std::cmp::max;
@@ -76,16 +76,15 @@ pub struct TransmissionTorrent {
 
 impl From<PutIOTransfer> for TransmissionTorrent {
     fn from(t: PutIOTransfer) -> Self {
-        let s = match t.started_at {
-            Some(t) => t,
-            None => Utc::now().format("%FT%T").to_string(),
-        };
-
-        let started_at = Utc
-            .from_local_datetime(&NaiveDateTime::parse_from_str(&s, "%FT%T").unwrap())
-            .unwrap();
-        let now = Utc::now();
-        let seconds_downloading = (now - started_at).num_seconds();
+        // put.io gives started_at as a UTC time without an offset, such as
+        // "2026-11-18T16:58:12". A transfer that hasn't started, or a time
+        // that doesn't parse, counts as 0 seconds downloading.
+        let seconds_downloading = t
+            .started_at
+            .as_deref()
+            .and_then(|s| s.parse::<civil::DateTime>().ok())
+            .and_then(|dt| TimeZone::UTC.to_timestamp(dt).ok())
+            .map_or(0, |started| Timestamp::now().duration_since(started).as_secs());
         let default = &"Unknown".to_string();
         let name = t.name.as_ref().unwrap_or(default);
         let is_finished = t.finished_at.is_some();
@@ -222,5 +221,36 @@ mod tests {
 
         assert!(torrent.is_finished);
         assert_eq!(torrent.error_string, None);
+    }
+
+    #[test]
+    fn seconds_downloading_counts_from_started_at_in_utc() {
+        let hour_ago = Timestamp::now() - jiff::SignedDuration::from_secs(3600);
+        let started_at = hour_ago
+            .to_zoned(TimeZone::UTC)
+            .strftime("%FT%T")
+            .to_string();
+        let t = PutIOTransfer {
+            started_at: Some(started_at),
+            ..base_transfer()
+        };
+
+        let torrent: TransmissionTorrent = t.into();
+
+        assert!((3600..3610).contains(&torrent.seconds_downloading));
+    }
+
+    #[test]
+    fn seconds_downloading_is_zero_without_a_usable_started_at() {
+        for started_at in [None, Some("not a date".to_string())] {
+            let t = PutIOTransfer {
+                started_at,
+                ..base_transfer()
+            };
+
+            let torrent: TransmissionTorrent = t.into();
+
+            assert_eq!(torrent.seconds_downloading, 0);
+        }
     }
 }
