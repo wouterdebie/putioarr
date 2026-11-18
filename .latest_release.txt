@@ -1,13 +1,5 @@
-# 0.6.10
-
-New
-- download_archives option, off by default: also download archives (RAR
-  parts, zip, 7z) for an extractor such as Unpackerr to unpack. An archive
-  counts as imported once it's gone from disk, or once the *arr imports a
-  file from the transfer's own folder (#41)
+# 0.6.11
 
 Docs
-- README guide to connecting Sonarr/Radarr/Whisparr, and a Troubleshooting
-  section. The download directory must be mounted at the same path in
-  putioarr and the *arr; a Remote Path Mapping stops putioarr from cleaning
-  up (#38, closes #4)
+- README: the usage section now names the right command,
+  `putioarr generate-config` instead of `putio generate-config` (#50)
