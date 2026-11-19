@@ -71,6 +71,12 @@ pub struct StateManager {
     /// only when the *arr polls or the status line is logged, so it adds no
     /// measurable cost to the download hot path.
     local_bytes: Arc<RwLock<HashMap<String, Arc<AtomicU64>>>>,
+    /// Hashes of transfers the *arr removed with torrent-remove, and when.
+    /// Download workers stop pulling their files, and a failed download isn't
+    /// retried, so a removed transfer's files don't come back after its local
+    /// copy was deleted (issues #51, #52). Entries expire after
+    /// [`Self::REMOVED_TTL`], and a new torrent-add of the same hash clears one.
+    removed: Arc<RwLock<HashMap<String, Instant>>>,
 }
 
 impl StateManager {
@@ -84,7 +90,33 @@ impl StateManager {
             orphans: Arc::new(RwLock::new(HashMap::new())),
             arr_error_logged: Arc::new(RwLock::new(HashMap::new())),
             local_bytes: Arc::new(RwLock::new(HashMap::new())),
+            removed: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+
+    /// How long a removed marker is kept. Far longer than any download retry
+    /// interval, so a removed transfer can't be picked up again meanwhile.
+    const REMOVED_TTL: Duration = Duration::from_secs(24 * 60 * 60);
+
+    /// Records that the *arr removed this transfer (torrent-remove).
+    pub async fn mark_removed(&self, hash: &str) {
+        let mut removed = self.removed.write().await;
+        removed.retain(|_, at| at.elapsed() < Self::REMOVED_TTL);
+        removed.insert(hash.to_lowercase(), Instant::now());
+    }
+
+    /// True if the *arr removed this transfer, so its downloads should stop.
+    pub async fn is_removed(&self, hash: &str) -> bool {
+        self.removed
+            .read()
+            .await
+            .get(&hash.to_lowercase())
+            .is_some_and(|at| at.elapsed() < Self::REMOVED_TTL)
+    }
+
+    /// Forgets a removed marker, for when the *arr adds the same torrent again.
+    pub async fn clear_removed(&self, hash: &str) {
+        self.removed.write().await.remove(&hash.to_lowercase());
     }
 
     /// Returns the shared byte counter for a transfer's local download, creating
@@ -295,5 +327,20 @@ impl StateManager {
             );
             default_dir.to_string()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[actix_rt::test]
+    async fn removed_marker_is_case_insensitive_and_can_be_cleared() {
+        let state = StateManager::new("k".to_string());
+        assert!(!state.is_removed("abcd").await);
+        state.mark_removed("ABCD").await;
+        assert!(state.is_removed("abcd").await);
+        state.clear_removed("AbCd").await;
+        assert!(!state.is_removed("abcd").await);
     }
 }

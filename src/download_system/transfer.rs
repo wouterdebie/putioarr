@@ -21,6 +21,9 @@ use std::{
 };
 use tokio::time::sleep;
 
+/// Stands in for the hash of a transfer put.io reports without one.
+const NO_HASH: &str = "0000";
+
 #[derive(Clone)]
 pub struct Transfer {
     pub name: String,
@@ -34,9 +37,17 @@ pub struct Transfer {
     /// cleaned up by deleting the file directly, since there is no transfer to
     /// remove or seeding to wait on (issue #34).
     pub is_orphan: bool,
+    /// How often a failed download of this transfer was retried (issue #51).
+    pub retries: u32,
 }
 
 impl Transfer {
+    /// The hash used as the key for per-transfer state, such as the removed
+    /// marker. Download targets carry the same value as `transfer_hash`.
+    pub fn hash_key(&self) -> &str {
+        self.hash.as_deref().unwrap_or(NO_HASH)
+    }
+
     pub async fn is_imported(&self) -> bool {
         let targets = self.targets.as_ref().unwrap().clone();
         let apps: Vec<ArrApp> = self
@@ -183,9 +194,7 @@ impl Transfer {
     async fn generate_targets(&self, base_path: Option<String>) -> Result<Vec<DownloadTarget>> {
         info!("{}: generating targets", self);
         let file_id = self.file_id.context("transfer has no file_id")?;
-        let default = "0000".to_string();
-        let hash = self.hash.as_ref().unwrap_or(&default).as_str();
-        recurse_download_targets(&self.app_data, file_id, hash, base_path, true).await
+        recurse_download_targets(&self.app_data, file_id, self.hash_key(), base_path, true).await
     }
 
     pub fn get_top_level(&self) -> DownloadTarget {
@@ -208,6 +217,7 @@ impl Transfer {
             hash: transfer.hash.clone(),
             app_data,
             is_orphan: false,
+            retries: 0,
         }
     }
 
@@ -227,6 +237,7 @@ impl Transfer {
             hash: Some(format!("{:040x}", file_id as u64)),
             app_data,
             is_orphan: true,
+            retries: 0,
         }
     }
 }
@@ -722,38 +733,10 @@ async fn scan_watch_folders(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use figment::{
-        providers::{Format, Toml},
-        Figment,
-    };
 
     /// AppData with no *arr configured, so `is_imported` makes no HTTP calls.
     fn app_data() -> Data<AppData> {
-        let config: crate::Config = Figment::new()
-            .merge(Toml::string(
-                r#"
-                bind_address = "0.0.0.0"
-                download_directory = "/downloads"
-                download_workers = 1
-                loglevel = "info"
-                orchestration_workers = 1
-                password = "p"
-                polling_interval = 10
-                port = 9091
-                skip_directories = ["sample"]
-                uid = 1000
-                username = "u"
-                [putio]
-                api_key = "k"
-                "#,
-            ))
-            .extract()
-            .unwrap();
-        Data::new(AppData {
-            config,
-            state: crate::state::StateManager::new("k".to_string()),
-            http: reqwest::Client::new(),
-        })
+        crate::test_support::app_data_in("/downloads")
     }
 
     fn target(target_type: TargetType, to: &str) -> DownloadTarget {

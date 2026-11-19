@@ -18,6 +18,8 @@ mod download_system;
 mod http;
 mod services;
 mod state;
+#[cfg(test)]
+mod test_support;
 mod utils;
 
 /// put.io to sonarr/radarr proxy

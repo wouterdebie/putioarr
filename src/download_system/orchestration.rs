@@ -54,8 +54,13 @@ impl Worker {
                     // (silently) killed the worker and, via the dropped done
                     // channels, cascaded to the others until everything stalled
                     // (issue #34). Log and carry on instead.
-                    if let Err(e) = self.handle_queued(t).await {
-                        warn!("download orchestration error (worker continuing): {}", e);
+                    match self.handle_queued(t.clone()).await {
+                        Ok(true) => {}
+                        Ok(false) => self.after_failed_download(t).await,
+                        Err(e) => {
+                            warn!("{}: download orchestration error (worker continuing): {:#}", t, e);
+                            self.after_failed_download(t).await;
+                        }
                     }
                 }
                 TransferMessage::Downloaded(t) => {
@@ -69,10 +74,33 @@ impl Worker {
         }
     }
 
+    /// After a transfer's download failed: a watch-folder orphan is dropped so
+    /// a later scan picks it up again (issue #34). Any other transfer is queued
+    /// again after a backoff. It stays on the producer's seen list for as long
+    /// as it's on put.io, so without this it sat at 99% until a restart (#51).
+    async fn after_failed_download(&self, t: Transfer) {
+        if t.is_orphan {
+            if let Some(file_id) = t.file_id {
+                self.app_data.state.remove_orphan(file_id).await;
+            }
+            return;
+        }
+        if self.app_data.state.is_removed(t.hash_key()).await {
+            info!("{}: removed by the *arr, not retrying", t);
+            return;
+        }
+        let delay = retry_delay(t.retries);
+        warn!("{}: retrying the download in {}", t, format_delay(delay));
+        let app_data = self.app_data.clone();
+        let tx = self.tx.clone();
+        actix_rt::spawn(async move { requeue_after(app_data, tx, t, delay).await });
+    }
+
     /// Downloads all of a transfer's targets and, on full success, marks it
-    /// complete and forwards it for import. Returns Err on any failure so the
-    /// caller can log it without ending the worker (see issue #34).
-    async fn handle_queued(&self, t: Transfer) -> Result<()> {
+    /// complete and forwards it for import. Returns Ok(false) when some targets
+    /// failed, and Err on other failures, so the caller can retry it and log
+    /// without ending the worker (see issue #34).
+    async fn handle_queued(&self, t: Transfer) -> Result<bool> {
         info!("{}: download {}", t, "started".yellow());
         // Reuse targets computed when the transfer was discovered if present —
         // watch-folder orphans precompute them with the correct base dir
@@ -87,7 +115,7 @@ impl Worker {
         // below pass vacuously and mark the transfer complete.
         if targets.is_empty() {
             warn!("{}: no downloadable targets, skipping", t);
-            return Ok(());
+            return Ok(true);
         }
         // Only folders and no files: still report it complete so the *arr shows
         // why it can't import it, but it is never treated as imported, so its
@@ -120,10 +148,11 @@ impl Worker {
             all_downloaded.push(done_rx.recv().await?);
         }
 
-        if all_downloaded
+        let failed = all_downloaded
             .iter()
-            .all(|d| matches!(d, DownloadDoneStatus::Success))
-        {
+            .filter(|d| !matches!(d, DownloadDoneStatus::Success))
+            .count();
+        if failed == 0 {
             info!("{}: download {}", t, "done".blue());
             // The files now exist locally, so it's safe to report this transfer
             // as complete to the *arr (see issue #16).
@@ -140,17 +169,79 @@ impl Worker {
                     ..t
                 }))
                 .await?;
+            Ok(true)
         } else {
-            warn!("{}: not all targets downloaded", t);
-            // Drop a failed orphan from tracking so a later watch-folder scan
-            // can retry it instead of it being suppressed forever (issue #34).
-            if t.is_orphan {
-                if let Some(file_id) = t.file_id {
-                    self.app_data.state.remove_orphan(file_id).await;
+            warn!(
+                "{}: not all targets downloaded ({} of {} failed)",
+                t,
+                failed,
+                all_downloaded.len()
+            );
+            Ok(false)
+        }
+    }
+}
+
+/// How long to wait before downloading a failed transfer again: 1 minute,
+/// doubling with each retry, up to 30 minutes.
+fn retry_delay(retries: u32) -> Duration {
+    const FIRST: Duration = Duration::from_secs(60);
+    const MAX: Duration = Duration::from_secs(30 * 60);
+    FIRST.saturating_mul(2u32.saturating_pow(retries)).min(MAX)
+}
+
+fn format_delay(d: Duration) -> String {
+    match d.as_secs() {
+        60 => "1 minute".to_string(),
+        s if s % 60 == 0 => format!("{} minutes", s / 60),
+        s => format!("{s}s"),
+    }
+}
+
+/// Queues a failed transfer for download again after `delay`, as long as it's
+/// still on put.io and the *arr hasn't removed it. Files already on disk are
+/// skipped, so this finishes what's missing, like a restart does.
+async fn requeue_after(
+    app_data: Data<AppData>,
+    tx: Sender<TransferMessage>,
+    t: Transfer,
+    mut delay: Duration,
+) {
+    loop {
+        sleep(delay).await;
+        if app_data.state.is_removed(t.hash_key()).await {
+            info!("{}: removed by the *arr, not retrying", t);
+            return;
+        }
+        match putio::list_transfers(&app_data.config.putio.api_key).await {
+            Ok(r) if r.transfers.iter().any(|p| p.id == t.transfer_id) => {
+                info!("{}: retrying the download", t);
+                // Regenerate the targets, which also fetches fresh download URLs.
+                let retry = Transfer {
+                    retries: t.retries + 1,
+                    targets: None,
+                    ..t
+                };
+                if tx.send(TransferMessage::QueuedForDownload(retry)).await.is_err() {
+                    warn!("could not queue a retry: the orchestration workers are gone");
                 }
+                return;
+            }
+            Ok(_) => {
+                info!("{}: no longer on put.io, not retrying", t);
+                return;
+            }
+            Err(e) => {
+                // Don't give up on a put.io hiccup; check again later.
+                delay = retry_delay(u32::MAX);
+                warn!(
+                    "{}: could not check put.io before retrying ({}); trying again in {}",
+                    t,
+                    e,
+                    format_delay(delay)
+                );
             }
         }
-        Ok(())
     }
 }
 
@@ -167,6 +258,11 @@ async fn watch_for_import(
     let import_timeout = Duration::from_secs(app_data.config.import_timeout_secs);
     let started = Instant::now();
     loop {
+        // The *arr dropped it from its queue, so it will never import it.
+        if app_data.state.is_removed(transfer.hash_key()).await {
+            info!("{}: removed by the *arr, stopped watching imports", transfer);
+            break;
+        }
         if transfer.is_imported().await {
             info!("{}: imported", transfer);
             let top_level_target = transfer.get_top_level();
@@ -258,4 +354,22 @@ async fn watch_seeding(app_data: Data<AppData>, transfer: Transfer) -> Result<()
 
     info!("{}: done seeding", transfer);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn retry_delay_doubles_up_to_half_an_hour() {
+        let minutes: Vec<u64> = (0..7).map(|r| retry_delay(r).as_secs() / 60).collect();
+        assert_eq!(minutes, [1, 2, 4, 8, 16, 30, 30]);
+        assert_eq!(retry_delay(u32::MAX), Duration::from_secs(30 * 60));
+    }
+
+    #[test]
+    fn delays_read_naturally() {
+        assert_eq!(format_delay(Duration::from_secs(60)), "1 minute");
+        assert_eq!(format_delay(Duration::from_secs(16 * 60)), "16 minutes");
+    }
 }

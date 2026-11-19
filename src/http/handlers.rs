@@ -13,6 +13,7 @@ use log::{error, info, warn};
 use magnet_url::Magnet;
 use serde_json::json;
 use std::collections::HashSet;
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 fn determine_category(download_dir: &str, config: &Config) -> String {
@@ -130,6 +131,8 @@ pub(crate) async fn handle_torrent_add(
                     "torrent-add: storing state for hash={} category={} dir={}",
                     hash.to_lowercase(), category, full_download_dir
                 );
+                // The *arr may grab a torrent it removed before; download it again.
+                app_data.state.clear_removed(&hash).await;
                 app_data.state.add_transfer(
                     hash.to_lowercase(),
                     category.clone(),
@@ -166,6 +169,7 @@ pub(crate) async fn handle_torrent_add(
                         "torrent-add (magnet): storing state for hash={} category={} dir={}",
                         hash, category, full_download_dir
                     );
+                    app_data.state.clear_removed(&hash).await;
                     app_data.state.add_transfer(
                         hash,
                         category.clone(),
@@ -200,28 +204,31 @@ pub(crate) async fn handle_torrent_add(
 pub(crate) async fn handle_torrent_remove(
     api_token: &str,
     payload: &web::Json<TransmissionRequest>,
+    app_data: &web::Data<AppData>,
 ) -> Option<serde_json::Value> {
-    // TODO: leanup all the unwrap stuff
-    let arguments = payload.arguments.as_ref().unwrap().as_object().unwrap();
-    let ids: Vec<&str> = arguments
+    let arguments = payload.arguments.as_ref()?.as_object()?;
+    // The *arrs send hashes. Transmission also accepts numeric ids, which
+    // putioarr can't map to a transfer, so those are ignored.
+    let ids: Vec<String> = arguments
         .get("ids")
-        .unwrap()
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|id| id.as_str().unwrap())
-        .collect();
+        .and_then(|v| v.as_array())
+        .map(|ids| {
+            ids.iter()
+                .filter_map(|id| id.as_str())
+                .map(str::to_lowercase)
+                .collect()
+        })
+        .unwrap_or_default();
     let delete_local_data = arguments
         .get("delete-local-data")
-        .unwrap()
-        .as_bool()
-        .unwrap();
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     let putio_transfers: Vec<PutIOTransfer> = match putio::list_transfers(api_token).await {
         Ok(r) => r
             .transfers
             .into_iter()
-            .filter(|t| ids.contains(&t.hash.clone().unwrap_or(String::from("no_hash")).as_str()))
+            .filter(|t| t.hash.as_ref().is_some_and(|h| ids.contains(&h.to_lowercase())))
             .collect(),
         Err(e) => {
             error!("Failed to list put.io transfers for removal: {}", e);
@@ -229,7 +236,25 @@ pub(crate) async fn handle_torrent_remove(
         }
     };
 
+    // Stop downloads and retries for these transfers before anything is
+    // deleted, so their files don't come back afterwards. Only put.io
+    // transfers: a watch-folder orphan has no transfer to remove, and marking
+    // it would only make each new scan start it and stop it again.
+    for t in &putio_transfers {
+        if let Some(hash) = &t.hash {
+            app_data.state.mark_removed(hash).await;
+        }
+    }
+
     for t in putio_transfers {
+        // Find the local copy before the put.io file goes, while its name can
+        // still be looked up.
+        let local_copy = if delete_local_data && !app_data.config.keep_downloads {
+            local_copy_of(api_token, app_data, &t).await
+        } else {
+            None
+        };
+
         if let Err(e) = putio::remove_transfer(api_token, t.id).await {
             error!("Failed to remove put.io transfer {}: {}", t.id, e);
             continue;
@@ -242,9 +267,113 @@ pub(crate) async fn handle_torrent_remove(
                 }
             }
         }
+
+        // Like Transmission, delete-local-data also deletes the local copy, so
+        // "Remove from Download Client" in the *arr clears both (issue #52).
+        if delete_local_data {
+            if app_data.config.keep_downloads {
+                info!(
+                    "torrent-remove: keeping the local copy of transfer {} (keep_downloads)",
+                    t.id
+                );
+            } else if let Some(path) = local_copy {
+                delete_local_copy(&path).await;
+            }
+        }
     }
 
     None
+}
+
+/// The local file or folder of a put.io transfer: its put.io name inside the
+/// folder it was downloaded to. None if the name can't be found, or if the
+/// result wouldn't be a single entry inside the download directory.
+async fn local_copy_of(
+    api_token: &str,
+    app_data: &web::Data<AppData>,
+    t: &PutIOTransfer,
+) -> Option<PathBuf> {
+    let Some(file_id) = t.file_id else {
+        warn!("torrent-remove: transfer {} has no put.io file, so no local copy to delete", t.id);
+        return None;
+    };
+    let name = match app_data.state.get_file_name(file_id).await {
+        Some(name) => name,
+        None => match putio::list_files(api_token, file_id).await {
+            Ok(r) => r.parent.name,
+            Err(e) => {
+                warn!(
+                    "torrent-remove: could not look up the name of transfer {}, so its local copy \
+                     stays: {}",
+                    t.id, e
+                );
+                return None;
+            }
+        },
+    };
+    let download_directory = &app_data.config.download_directory;
+    let dir = match &t.hash {
+        Some(hash) => {
+            app_data
+                .state
+                .get_download_dir_for_transfer(hash, download_directory)
+                .await
+        }
+        None => download_directory.clone(),
+    };
+    let path = local_copy_path(download_directory, &dir, &name);
+    if path.is_none() {
+        warn!(
+            "torrent-remove: not deleting {:?} in {:?}: it isn't a single entry inside the \
+             download directory {:?}",
+            name, dir, download_directory
+        );
+    }
+    path
+}
+
+/// `dir/name`, but only when `dir` is the download directory or inside it,
+/// and `name` is one plain file or folder name. Guards the delete in
+/// torrent-remove against ever reaching the download directory itself, a
+/// category folder, or anything outside them.
+fn local_copy_path(download_directory: &str, dir: &str, name: &str) -> Option<PathBuf> {
+    let dir = Path::new(dir);
+    let plain = |p: &Path| {
+        p.components()
+            .all(|c| matches!(c, Component::RootDir | Component::CurDir | Component::Normal(_)))
+    };
+    if !plain(dir) || !dir.starts_with(download_directory) {
+        return None;
+    }
+    let mut parts = Path::new(name).components();
+    match (parts.next(), parts.next()) {
+        (Some(Component::Normal(n)), None) => Some(dir.join(n)),
+        _ => None,
+    }
+}
+
+/// Deletes a transfer's local file or folder, plus the partial
+/// `<name>.downloading` file a single-file transfer leaves while it's still
+/// being pulled. A symlink is removed, not followed. Failures are logged.
+async fn delete_local_copy(path: &Path) {
+    let mut partial = path.as_os_str().to_owned();
+    partial.push(".downloading");
+    let mut deleted = false;
+    for p in [path, Path::new(&partial)] {
+        let result = match tokio::fs::symlink_metadata(p).await {
+            Ok(m) if m.is_dir() => tokio::fs::remove_dir_all(p).await,
+            Ok(_) => tokio::fs::remove_file(p).await,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => Err(e),
+        };
+        match result {
+            Ok(()) => deleted = true,
+            Err(e) => warn!("torrent-remove: could not delete {}: {}", p.display(), e),
+        }
+    }
+    if deleted {
+        info!("torrent-remove: deleted the local copy {}", path.display());
+    }
 }
 
 pub(crate) async fn handle_torrent_get(
@@ -468,6 +597,60 @@ pub(crate) async fn handle_torrent_get(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn local_copy_is_one_entry_inside_the_download_directory() {
+        let path = |dir, name| local_copy_path("/downloads", dir, name);
+        assert_eq!(
+            path("/downloads/radarr", "Some.Movie.2024"),
+            Some(PathBuf::from("/downloads/radarr/Some.Movie.2024"))
+        );
+        assert_eq!(
+            path("/downloads", "movie.mkv"),
+            Some(PathBuf::from("/downloads/movie.mkv"))
+        );
+        // Never the download directory or a category folder itself...
+        assert_eq!(path("/downloads/radarr", ""), None);
+        assert_eq!(path("/downloads/radarr", "."), None);
+        assert_eq!(path("/downloads/radarr", ".."), None);
+        // ...nothing deeper or elsewhere...
+        assert_eq!(path("/downloads/radarr", "a/b"), None);
+        assert_eq!(path("/downloads/radarr", "/etc"), None);
+        assert_eq!(path("/downloads/radarr/../..", "etc"), None);
+        assert_eq!(path("/elsewhere", "Some.Movie.2024"), None);
+        // ...and not a sibling that merely shares the prefix.
+        assert_eq!(path("/downloads-old", "Some.Movie.2024"), None);
+        // A relative download directory works too.
+        assert_eq!(
+            local_copy_path("./downloads", "./downloads/radarr", "Some.Movie.2024"),
+            Some(PathBuf::from("./downloads/radarr/Some.Movie.2024"))
+        );
+    }
+
+    #[actix_rt::test]
+    async fn deleting_a_local_copy_removes_the_folder_or_the_file_and_its_partial() {
+        let base = std::env::temp_dir().join(format!("putioarr-remove-{}", std::process::id()));
+        let folder = base.join("Some.Movie.2024");
+        std::fs::create_dir_all(folder.join("Subs")).unwrap();
+        std::fs::write(folder.join("movie.mkv"), b"x").unwrap();
+        let file = base.join("movie.mkv");
+        std::fs::write(&file, b"x").unwrap();
+        let partial = base.join("movie.mkv.downloading");
+        std::fs::write(&partial, b"x").unwrap();
+        let other = base.join("Other.Movie.2024");
+        std::fs::create_dir_all(&other).unwrap();
+
+        delete_local_copy(&folder).await;
+        delete_local_copy(&file).await;
+        // Nothing there any more: a no-op, not an error.
+        delete_local_copy(&base.join("gone")).await;
+
+        assert!(!folder.exists());
+        assert!(!file.exists());
+        assert!(!partial.exists());
+        assert!(other.exists());
+        std::fs::remove_dir_all(&base).unwrap();
+    }
 
     // Info hash from the Big Buck Bunny WebTorrent magnet, and its base32 form.
     const HEX: &str = "dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c";

@@ -90,6 +90,10 @@ Container images are configured using parameters passed at runtime (such as thos
 ## Behavior
 The proxy will upload torrents or magnet links to put.io. It will then continue to monitor transfers. When a transfer is completed, all files belonging to the transfer will be downloaded to the specified download directory. The proxy will remove the files after sonarr/radarr/whisparr has imported them and put.io is done seeding. The proxy will skip directories named "Sample".
 
+If a download fails, putioarr tries it again after a minute, then after 2, 4, 8 and so on, up to every 30 minutes, for as long as the transfer is on put.io. Files that are already downloaded are skipped.
+
+Removing a download in the \*arr ("Remove from Download Client") removes the put.io transfer and its files. Unless `keep_downloads` is on, it also deletes the local copy in `download_directory`, as Transmission does. Use this to clean up a download that was only partly imported.
+
 ## Configuration
 A configuration file can be specified using `-c`, but the default configuration file location is:
 - Linux: ~/.config/putioarr/config.toml
@@ -131,8 +135,9 @@ orchestration_workers = 10
 download_workers = 4
 
 # Optional. When false (default), locally downloaded files are deleted after
-# the *arr imports them. Set to true to keep them in download_directory instead
-# (put.io transfers/files are still cleaned up).
+# the *arr imports them, or when you remove the download in the *arr. Set to
+# true to keep them in download_directory instead (put.io transfers/files are
+# still cleaned up).
 keep_downloads = false
 
 # Optional, default false. When true, archives (put.io type ARCHIVE: RAR parts,
@@ -253,7 +258,9 @@ download. Make sure the download directory is mounted into both containers at
 the same path — see *Connecting Sonarr/Radarr/Whisparr* above — and confirm the
 \*arr can list the files there. putioarr leaves the files alone until it sees
 the import. After `import_timeout_secs` (2 hours by default) it logs "still not
-imported … giving up watching" and stops checking that download.
+imported … giving up watching" and stops checking that download. If the \*arr
+will never import the rest, remove the download in the \*arr's queue: that
+also deletes the local copy (unless `keep_downloads` is on).
 
 **Downloads are imported, but the files stay in `download_directory` and on
 put.io.**
