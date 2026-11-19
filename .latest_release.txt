@@ -1,12 +1,12 @@
-# 0.6.12
+# 0.6.13
 
-Security
-- actix-http 3.22.0, which fixes three advisories in the HTTP server that
-  Sonarr/Radarr/Whisparr talk to: a stalled keep-alive request could hold a
-  connection open forever, and malformed chunked bodies could end a request
-  early or swallow the next one (RUSTSEC-2026-0552, -0553, -0554)
+Fixed
+- A download no longer sticks at 99% when its category folder doesn't
+  exist yet. The transfer's folder is created with any missing parents,
+  every failed file or folder logs why, and a failed download is retried
+  after 1, 2, 4 ... up to every 30 minutes while it's on put.io (#51)
 
-Changed
-- chrono is replaced with jiff, as chrono is no longer maintained
-  (RUSTSEC-2026-0543). A put.io start time that doesn't parse now counts as
-  0 seconds downloading instead of crashing
+New
+- Removing a download in the *arr ("Remove from Download Client") also
+  deletes its local copy in download_directory, as Transmission does,
+  unless keep_downloads is on. Downloads of a removed transfer stop (#52)
