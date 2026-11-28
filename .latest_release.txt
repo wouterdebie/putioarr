@@ -1,5 +1,9 @@
-# 0.6.15
+# 0.6.16
 
-Dependencies
-- anyhow 1.0.105, clap 4.6.10 and env_logger 0.11.12 (#57). env_logger
-  no longer pulls in a second, older copy of jiff
+Fixed
+- Starting putioarr while an *arr isn't answering yet (e.g. a compose
+  stack restarting together) no longer downloads imported transfers
+  again. A transfer the *arr couldn't be asked about isn't downloaded:
+  putioarr asks again after 1, 2, 4 ... up to every 30 minutes, then
+  sends it to seeding or download. Watch-folder files the *arr couldn't
+  be asked about wait for the next scan (#58)
