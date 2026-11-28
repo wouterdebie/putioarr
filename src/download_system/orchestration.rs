@@ -184,13 +184,13 @@ impl Worker {
 
 /// How long to wait before downloading a failed transfer again: 1 minute,
 /// doubling with each retry, up to 30 minutes.
-fn retry_delay(retries: u32) -> Duration {
+pub(super) fn retry_delay(retries: u32) -> Duration {
     const FIRST: Duration = Duration::from_secs(60);
     const MAX: Duration = Duration::from_secs(30 * 60);
     FIRST.saturating_mul(2u32.saturating_pow(retries)).min(MAX)
 }
 
-fn format_delay(d: Duration) -> String {
+pub(super) fn format_delay(d: Duration) -> String {
     match d.as_secs() {
         60 => "1 minute".to_string(),
         s if s % 60 == 0 => format!("{} minutes", s / 60),

@@ -1,3 +1,4 @@
+use super::orchestration::{format_delay, retry_delay};
 use crate::{
     services::{
         arr::ArrApp,
@@ -24,6 +25,47 @@ use tokio::time::sleep;
 /// Stands in for the hash of a transfer put.io reports without one.
 const NO_HASH: &str = "0000";
 
+/// Whether the *arr imported a transfer's files.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImportStatus {
+    Imported,
+    NotImported,
+    /// An *arr that could have imported a file didn't answer, so its history
+    /// can't tell either way. Counting that as "not imported" made putioarr
+    /// download imported transfers again when it started before the *arr
+    /// (issue #58), so callers ask again later instead.
+    Unknown,
+}
+
+impl ImportStatus {
+    /// One file's status, from the answers of the *arrs that could have
+    /// imported it (None: that *arr didn't answer). It's imported if any of
+    /// them says so, and unknown if none did but one didn't answer.
+    fn from_answers(answers: &[Option<bool>]) -> Self {
+        if answers.contains(&Some(true)) {
+            Self::Imported
+        } else if answers.contains(&None) {
+            Self::Unknown
+        } else {
+            Self::NotImported
+        }
+    }
+
+    /// A transfer's status, from those of its files: not imported if any file
+    /// isn't, otherwise unknown if any file's status is.
+    fn of_all(statuses: impl IntoIterator<Item = Self>) -> Self {
+        let mut all = Self::Imported;
+        for status in statuses {
+            match status {
+                Self::NotImported => return Self::NotImported,
+                Self::Unknown => all = Self::Unknown,
+                Self::Imported => {}
+            }
+        }
+        all
+    }
+}
+
 #[derive(Clone)]
 pub struct Transfer {
     pub name: String,
@@ -48,7 +90,13 @@ impl Transfer {
         self.hash.as_deref().unwrap_or(NO_HASH)
     }
 
+    /// True if the *arr imported all of this transfer's files. A file whose
+    /// *arr didn't answer counts as not imported yet.
     pub async fn is_imported(&self) -> bool {
+        self.import_status().await == ImportStatus::Imported
+    }
+
+    pub async fn import_status(&self) -> ImportStatus {
         let targets = self.targets.as_ref().unwrap().clone();
         let apps: Vec<ArrApp> = self
             .app_data
@@ -69,7 +117,7 @@ impl Transfer {
         // such as a RAR release (put.io type ARCHIVE) with download_archives
         // off. Nothing was downloaded, so nothing can have been imported.
         if targets.is_empty() {
-            return false;
+            return ImportStatus::NotImported;
         }
 
         // The transfer's own folder, if it is a folder rather than a single file.
@@ -81,9 +129,9 @@ impl Transfer {
             .find(|t| t.top_level && t.target_type == TargetType::Directory)
             .map(|t| t.to.clone());
 
-        let mut results = Vec::<bool>::new();
+        let mut results = Vec::<ImportStatus>::new();
         // Archive parts in the same transfer folder share one history lookup.
-        let mut dir_import_cache = std::collections::HashMap::<String, bool>::new();
+        let mut dir_import_cache = std::collections::HashMap::<String, ImportStatus>::new();
         for target in targets {
             // The *arr never imports archive parts (put.io type ARCHIVE, only
             // downloaded with download_archives), only the file an extractor
@@ -94,7 +142,7 @@ impl Transfer {
             if target.media_type == Some(MediaType::Archive) {
                 if !Path::new(&target.to).exists() {
                     info!("{}: archive gone (extracted)", target);
-                    results.push(true);
+                    results.push(ImportStatus::Imported);
                     continue;
                 }
                 // A transfer that is a single archive file has no folder of its
@@ -102,41 +150,30 @@ impl Transfer {
                 // nearly every import's path contains, so only its removal can
                 // tell us it was extracted.
                 let Some(dir) = archive_import_dir(&target, transfer_dir.as_deref()) else {
-                    results.push(false);
+                    results.push(ImportStatus::NotImported);
                     continue;
                 };
                 if let Some(hit) = dir_import_cache.get(&dir) {
                     results.push(*hit);
                     continue;
                 }
-                let mut dir_imported = false;
+                let mut answers = vec![];
                 for app in &apps {
-                    match app.check_imported_dir(&dir).await {
-                        Ok(true) => {
-                            dir_imported = true;
-                            break;
-                        }
-                        Ok(false) => {}
-                        Err(e) => {
-                            if self.app_data.state.should_log_arr_error(&app.name).await {
-                                error!(
-                                    "Error retrieving history from {} (suppressing repeats for {:?}): {}",
-                                    app,
-                                    crate::state::StateManager::ARR_ERROR_LOG_INTERVAL,
-                                    e
-                                );
-                            }
-                        }
+                    let answer = self.answer(app, app.check_imported_dir(&dir).await).await;
+                    answers.push(answer);
+                    if answer == Some(true) {
+                        break;
                     }
                 }
-                if dir_imported {
+                let status = ImportStatus::from_answers(&answers);
+                if status == ImportStatus::Imported {
                     info!("{}: archive extracted and imported from {}", target, dir);
                 }
-                dir_import_cache.insert(dir, dir_imported);
-                results.push(dir_imported);
+                dir_import_cache.insert(dir, status);
+                results.push(status);
                 continue;
             }
-            let mut service_results = vec![];
+            let mut answers = vec![];
             for app in &apps {
                 // Only ask an *arr about files matching its media type.
                 if let Some(mt) = &target.media_type {
@@ -144,40 +181,46 @@ impl Transfer {
                         continue;
                     }
                 }
-                let service_result = match app.check_imported(&target.to).await {
-                    Ok(r) => r,
-                    Err(e) => {
-                        // A misconfigured/unreachable *arr fails for every
-                        // transfer on every poll; throttle the log so it doesn't
-                        // fill the disk over time (issue #21). Key on the app's
-                        // existing name (no allocation on the suppressed path).
-                        if self.app_data.state.should_log_arr_error(&app.name).await {
-                            error!(
-                                "Error retrieving history from {} (suppressing repeats for {:?}): {}",
-                                app,
-                                crate::state::StateManager::ARR_ERROR_LOG_INTERVAL,
-                                e
-                            );
-                        }
-                        false
-                    }
-                };
-                if service_result {
+                let answer = self.answer(app, app.check_imported(&target.to).await).await;
+                if answer == Some(true) {
                     info!(
                         "{}: found imported by {}",
                         target,
                         app.to_string().bright_blue()
                     );
                 }
-                service_results.push(service_result)
+                answers.push(answer);
             }
             // If no service was eligible for this target, treat it as imported
             // (otherwise an audio file with no Lidarr would block forever).
-            let any_imported = service_results.is_empty() || service_results.into_iter().any(|x| x);
-            results.push(any_imported);
+            results.push(if answers.is_empty() {
+                ImportStatus::Imported
+            } else {
+                ImportStatus::from_answers(&answers)
+            });
         }
-        // Check if all targets have been imported
-        results.into_iter().all(|x| x)
+        ImportStatus::of_all(results)
+    }
+
+    /// An *arr's answer to a history lookup, or None if it didn't answer.
+    async fn answer(&self, app: &ArrApp, result: Result<bool>) -> Option<bool> {
+        match result {
+            Ok(imported) => Some(imported),
+            Err(e) => {
+                // A misconfigured/unreachable *arr fails for every transfer on
+                // every poll; throttle the log so it doesn't fill the disk over
+                // time (issue #21).
+                if self.app_data.state.should_log_arr_error(&app.name).await {
+                    error!(
+                        "Error retrieving history from {} (suppressing repeats for {:?}): {}",
+                        app,
+                        crate::state::StateManager::ARR_ERROR_LOG_INTERVAL,
+                        e
+                    );
+                }
+                None
+            }
+        }
     }
 
     pub async fn get_download_targets(&self) -> Result<Vec<DownloadTarget>> {
@@ -427,6 +470,59 @@ async fn is_managed(app_data: &Data<AppData>, putio_transfer: &PutIOTransfer) ->
     }
 }
 
+/// Asks the *arrs again whether a transfer found at startup was imported, with
+/// the same backoff as a failed download (1, 2, 4 ... up to 30 minutes), until
+/// they answer. Then it goes on as the startup check would have sent it: to
+/// seeding if imported, to download if not (issue #58). Stops if the transfer
+/// leaves put.io or the *arr removes it meanwhile.
+async fn recheck_import(app_data: Data<AppData>, tx: Sender<TransferMessage>, transfer: Transfer) {
+    let mut attempt = 0;
+    loop {
+        let delay = retry_delay(attempt);
+        warn!(
+            "{}: couldn't ask the *arr whether this was imported; not downloading it until it \
+             answers, asking again in {}",
+            transfer,
+            format_delay(delay)
+        );
+        sleep(delay).await;
+        if app_data.state.is_removed(transfer.hash_key()).await {
+            info!("{}: removed by the *arr", transfer);
+            return;
+        }
+        // On a put.io error, ask the *arr anyway: a transfer that's gone fails
+        // harmlessly later on.
+        if let Ok(r) = putio::list_transfers(&app_data.config.putio.api_key).await {
+            if !r.transfers.iter().any(|p| p.id == transfer.transfer_id) {
+                info!("{}: no longer on put.io", transfer);
+                return;
+            }
+        }
+        let message = match transfer.import_status().await {
+            ImportStatus::Imported => {
+                info!("{}: already imported", transfer);
+                TransferMessage::Imported(transfer)
+            }
+            ImportStatus::NotImported => {
+                info!("{}: not imported yet", transfer);
+                // Regenerate the targets, which also fetches fresh download URLs.
+                TransferMessage::QueuedForDownload(Transfer {
+                    targets: None,
+                    ..transfer
+                })
+            }
+            ImportStatus::Unknown => {
+                attempt += 1;
+                continue;
+            }
+        };
+        if tx.send(message).await.is_err() {
+            warn!("could not pass on a transfer: the orchestration workers are gone");
+        }
+        return;
+    }
+}
+
 pub async fn produce_transfers(app_data: Data<AppData>, tx: Sender<TransferMessage>) -> Result<()> {
     let putio_check_interval = Duration::from_secs(app_data.config.polling_interval);
     let mut seen = Vec::<u64>::new();
@@ -461,12 +557,22 @@ pub async fn produce_transfers(app_data: Data<AppData>, tx: Sender<TransferMessa
                 continue;
             }
             transfer.targets = Some(targets?);
-            if transfer.is_imported().await {
-                info!("{}: already imported", transfer);
-                seen.push(transfer.transfer_id);
-                tx.send(TransferMessage::Imported(transfer)).await?;
-            } else {
-                info!("{}: not imported yet", transfer);
+            match transfer.import_status().await {
+                ImportStatus::Imported => {
+                    info!("{}: already imported", transfer);
+                    seen.push(transfer.transfer_id);
+                    tx.send(TransferMessage::Imported(transfer)).await?;
+                }
+                ImportStatus::NotImported => info!("{}: not imported yet", transfer),
+                ImportStatus::Unknown => {
+                    // An *arr didn't answer, as happens when it starts together
+                    // with putioarr. The monitor loop below would download the
+                    // transfer, imported or not, so keep it out of there and
+                    // ask again until the *arr answers (issue #58).
+                    seen.push(transfer.transfer_id);
+                    let (app_data, tx) = (app_data.clone(), tx.clone());
+                    actix_rt::spawn(async move { recheck_import(app_data, tx, transfer).await });
+                }
             }
         }
     }
@@ -691,16 +797,29 @@ async fn scan_watch_folders(
             };
             transfer.targets = Some(targets);
 
-            if transfer.is_imported().await {
-                // Already imported by the *arr — just clean it off put.io.
-                info!("{}: orphan already imported, deleting from put.io", transfer);
-                if let Err(e) = putio::delete_file(api_key, file.id).await {
-                    warn!(
-                        "{}: failed to delete imported orphan from put.io: {}",
-                        transfer, e
-                    );
+            match transfer.import_status().await {
+                ImportStatus::Imported => {
+                    // Already imported by the *arr — just clean it off put.io.
+                    info!("{}: orphan already imported, deleting from put.io", transfer);
+                    if let Err(e) = putio::delete_file(api_key, file.id).await {
+                        warn!(
+                            "{}: failed to delete imported orphan from put.io: {}",
+                            transfer, e
+                        );
+                    }
+                    continue;
                 }
-                continue;
+                ImportStatus::Unknown => {
+                    // An *arr didn't answer. The next scan asks again, rather
+                    // than pulling a file that may be imported already (#58).
+                    debug!(
+                        "{}: couldn't ask the *arr whether this orphan was imported, checking \
+                         again next scan",
+                        transfer
+                    );
+                    continue;
+                }
+                ImportStatus::NotImported => {}
             }
 
             info!("{}: orphan ready for download", transfer);
@@ -794,6 +913,87 @@ mod tests {
         assert!(!t.is_imported().await);
         std::fs::remove_file(&path).unwrap();
         assert!(t.is_imported().await);
+    }
+
+    #[test]
+    fn a_file_is_imported_if_any_arr_says_so_and_unknown_if_one_did_not_answer() {
+        use ImportStatus::*;
+        assert_eq!(ImportStatus::from_answers(&[Some(false), Some(true)]), Imported);
+        assert_eq!(ImportStatus::from_answers(&[None, Some(true)]), Imported);
+        assert_eq!(ImportStatus::from_answers(&[Some(false), None]), Unknown);
+        assert_eq!(ImportStatus::from_answers(&[Some(false)]), NotImported);
+        // A transfer: a file that isn't imported decides it, then an unknown one.
+        assert_eq!(ImportStatus::of_all([Imported, Unknown, NotImported]), NotImported);
+        assert_eq!(ImportStatus::of_all([Imported, Unknown]), Unknown);
+        assert_eq!(ImportStatus::of_all([Imported, Imported]), Imported);
+    }
+
+    /// AppData with Radarr at `url`, so it's asked about video files.
+    fn with_radarr(url: &str) -> Data<AppData> {
+        crate::test_support::app_data_with(
+            "/downloads",
+            &format!("[radarr]\nurl = \"{url}\"\napi_key = \"x\"\n"),
+        )
+    }
+
+    /// A stand-in *arr that answers every request with `body`; returns its URL.
+    fn serve(body: &'static str) -> String {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { continue };
+                // Read the request up to the end of its headers.
+                let mut request = Vec::new();
+                let mut buf = [0u8; 1024];
+                while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                    match stream.read(&mut buf) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => request.extend_from_slice(&buf[..n]),
+                    }
+                }
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\
+                     Connection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(response.as_bytes());
+            }
+        });
+        url
+    }
+
+    fn movie(app_data: Data<AppData>) -> Transfer {
+        let mut t = Transfer::from_orphan(app_data, 1, "Some.Release".to_string());
+        t.targets = Some(vec![
+            target(TargetType::Directory, "/downloads/Some.Release"),
+            target(TargetType::File, "/downloads/Some.Release/movie.mkv"),
+        ]);
+        t
+    }
+
+    #[actix_rt::test]
+    async fn import_status_follows_the_arrs_history() {
+        let imported = serve(
+            r#"{"totalRecords":1,"records":[{"eventType":"downloadFolderImported",
+                "data":{"droppedPath":"/downloads/Some.Release/movie.mkv"}}]}"#,
+        );
+        let t = movie(with_radarr(&imported));
+        assert_eq!(t.import_status().await, ImportStatus::Imported);
+
+        let empty = serve(r#"{"totalRecords":0,"records":[]}"#);
+        let t = movie(with_radarr(&empty));
+        assert_eq!(t.import_status().await, ImportStatus::NotImported);
+    }
+
+    #[actix_rt::test]
+    async fn import_status_is_unknown_while_the_arr_does_not_answer() {
+        // Nothing listens on port 1, as with an *arr that's still starting (#58).
+        let t = movie(with_radarr("http://127.0.0.1:1"));
+        assert_eq!(t.import_status().await, ImportStatus::Unknown);
+        assert!(!t.is_imported().await);
     }
 
     #[actix_rt::test]

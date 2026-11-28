@@ -92,6 +92,8 @@ The proxy will upload torrents or magnet links to put.io. It will then continue 
 
 The \*arr shows one progress bar for both stages: put.io's download is the first half, and putioarr pulling the files to `download_directory` is the second. Time Left shows put.io's estimate during the first half and putioarr's own estimate during the second. It's blank when there's no estimate yet, such as in the first minute of the pull.
 
+At startup, putioarr asks the \*arr which transfers on put.io it already imported, so it doesn't download those again. If an \*arr isn't answering yet, for example because it's starting at the same time, putioarr asks again after 1, 2, 4 ... up to every 30 minutes, and doesn't download those transfers until it gets an answer.
+
 If a download fails, putioarr tries it again after a minute, then after 2, 4, 8 and so on, up to every 30 minutes, for as long as the transfer is on put.io. Files that are already downloaded are skipped.
 
 Removing a download in the \*arr ("Remove from Download Client") removes the put.io transfer and its files. Unless `keep_downloads` is on, it also deletes the local copy in `download_directory`, as Transmission does. Use this to clean up a download that was only partly imported.

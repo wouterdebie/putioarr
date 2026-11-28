@@ -10,6 +10,12 @@ use figment::{
 /// AppData downloading into `download_directory`, with no *arr configured so
 /// nothing calls one.
 pub fn app_data_in(download_directory: &str) -> Data<AppData> {
+    app_data_with(download_directory, "")
+}
+
+/// Like [`app_data_in`], with `extra` appended to the config, such as an
+/// *arr's section.
+pub fn app_data_with(download_directory: &str, extra: &str) -> Data<AppData> {
     let config: crate::Config = Figment::new()
         .merge(Toml::string(&format!(
             r#"
@@ -26,6 +32,7 @@ pub fn app_data_in(download_directory: &str) -> Data<AppData> {
             username = "u"
             [putio]
             api_key = "k"
+            {extra}
             "#
         )))
         .extract()
