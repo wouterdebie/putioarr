@@ -1,11 +1,5 @@
-# 0.6.14
-
-Fixed
-- Time Left in the *arr's queue no longer shows 00:00:00 while putioarr
-  pulls the files. It shows put.io's estimate while put.io downloads,
-  then putioarr's own estimate from the local download speed, and is
-  blank when there's no estimate yet (#56)
+# 0.6.15
 
 Dependencies
-- url 2.5.9 for RUSTSEC-2026-0592, jiff 1.0, nix 0.32, actix-rt 2.16,
-  actix-web 4.20 and clap 4.6.9 (#53, #54, #55)
+- anyhow 1.0.105, clap 4.6.10 and env_logger 0.11.12 (#57). env_logger
+  no longer pulls in a second, older copy of jiff
