@@ -466,6 +466,10 @@ pub(crate) async fn handle_torrent_get(
                     tt.status,
                     TransmissionTorrentStatus::Seeding | TransmissionTorrentStatus::Stopped
                 );
+            //
+            // The eta follows the same stages: put.io's own estimate while it
+            // downloads, then putioarr's estimate of the local pull, and -1 ("no
+            // estimate") when there's neither (issue #56).
             let size = tt.total_size.max(0);
             if !app_data.state.is_local_complete(t.id).await {
                 if size > 0 {
@@ -480,6 +484,14 @@ pub(crate) async fn handle_torrent_get(
                                 .unwrap_or(0)
                                 .min(size as u64) as i64,
                             None => 0,
+                        };
+                        tt.eta = match &t.hash {
+                            Some(hash) => app_data
+                                .state
+                                .local_eta(hash, (size - local) as u64)
+                                .await
+                                .unwrap_or(-1),
+                            None => -1,
                         };
                         size / 2 + local / 2
                     } else {
@@ -496,9 +508,15 @@ pub(crate) async fn handle_torrent_get(
                     // non-zero amount remaining rather than let 0/0 read as
                     // complete and trigger an early import (#16).
                     tt.left_until_done = std::cmp::max(tt.left_until_done, 1);
+                    if putio_done {
+                        tt.eta = -1;
+                    }
                 }
                 tt.is_finished = false;
                 tt.status = TransmissionTorrentStatus::Downloading;
+            } else {
+                // The files are on disk: nothing left to download.
+                tt.eta = 0;
             }
             tt
         }
@@ -538,6 +556,19 @@ pub(crate) async fn handle_torrent_get(
         } else {
             (1, 1, 0)
         };
+        // Like a transfer's local pull: an estimate once there's a rate, -1
+        // ("no estimate") before that or when the size is unknown (#56).
+        let eta = if complete {
+            0
+        } else if size > 0 {
+            app_data
+                .state
+                .local_eta(&orphan.hash, (size - local) as u64)
+                .await
+                .unwrap_or(-1)
+        } else {
+            -1
+        };
         transmission_transfers.push(TransmissionTorrent {
             id,
             hash_string: Some(orphan.hash),
@@ -546,7 +577,7 @@ pub(crate) async fn handle_torrent_get(
             total_size,
             left_until_done,
             is_finished: complete,
-            eta: 0,
+            eta,
             status: if complete {
                 TransmissionTorrentStatus::Seeding
             } else {

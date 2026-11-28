@@ -96,7 +96,11 @@ impl From<PutIOTransfer> for TransmissionTorrent {
             total_size: t.size.unwrap_or(0),
             left_until_done: max(t.size.unwrap_or(0) - t.downloaded.unwrap_or(0), 0),
             is_finished,
-            eta: t.estimated_time.unwrap_or(0),
+            // put.io leaves estimated_time out when it has no estimate (and
+            // once its own download is done). Transmission's -1 means "no
+            // estimate", which the *arrs show as a blank Time Left, where 0
+            // would show as 00:00:00 (issue #56).
+            eta: t.estimated_time.filter(|e| *e >= 0).unwrap_or(-1),
             status: TransmissionTorrentStatus::from(t.status),
             seconds_downloading,
             // put.io can leave error_message set from a transient problem it
@@ -221,6 +225,20 @@ mod tests {
 
         assert!(torrent.is_finished);
         assert_eq!(torrent.error_string, None);
+    }
+
+    #[test]
+    fn eta_is_puts_estimate_or_minus_one_without_one() {
+        let eta = |estimated_time| {
+            TransmissionTorrent::from(PutIOTransfer {
+                estimated_time,
+                ..base_transfer()
+            })
+            .eta
+        };
+        assert_eq!(eta(Some(120)), 120);
+        assert_eq!(eta(None), -1);
+        assert_eq!(eta(Some(-5)), -1);
     }
 
     #[test]

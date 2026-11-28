@@ -31,6 +31,72 @@ pub struct OrphanFile {
     pub download_dir: String,
 }
 
+/// A transfer's local download rate, estimated from its byte counter each time
+/// the *arr polls, so torrent-get can report a real `eta` while putioarr pulls
+/// the files (issue #56).
+#[derive(Debug, Clone, Copy)]
+pub struct RateSample {
+    at: Instant,
+    bytes: u64,
+    /// Smoothed bytes per second, or None until two samples are far enough apart.
+    rate: Option<f64>,
+}
+
+impl RateSample {
+    /// Samples closer together than this are ignored: over a very short window
+    /// the counter moves in bursts and the rate would jump around.
+    const MIN_INTERVAL: Duration = Duration::from_secs(5);
+    /// How quickly the smoothed rate follows a change in speed. A sample a
+    /// minute after the last one (the *arr's usual poll) moves the rate about
+    /// 40% of the way to the speed over that minute.
+    const SMOOTHING: Duration = Duration::from_secs(120);
+
+    /// The sample after seeing `bytes` downloaded at `now`.
+    fn next(prev: Option<RateSample>, now: Instant, bytes: u64) -> RateSample {
+        let Some(prev) = prev else {
+            return RateSample {
+                at: now,
+                bytes,
+                rate: None,
+            };
+        };
+        if bytes < prev.bytes {
+            // A file started over (the server ignored the Range request), so its
+            // bytes were taken off the counter. The speed hasn't changed: keep
+            // the rate and measure from here.
+            return RateSample {
+                at: now,
+                bytes,
+                rate: prev.rate,
+            };
+        }
+        let elapsed = now.saturating_duration_since(prev.at);
+        if elapsed < Self::MIN_INTERVAL {
+            return prev;
+        }
+        let current = (bytes - prev.bytes) as f64 / elapsed.as_secs_f64();
+        let rate = match prev.rate {
+            None => current,
+            Some(rate) => {
+                let weight = 1.0 - (-elapsed.as_secs_f64() / Self::SMOOTHING.as_secs_f64()).exp();
+                rate + weight * (current - rate)
+            }
+        };
+        RateSample {
+            at: now,
+            bytes,
+            rate: Some(rate),
+        }
+    }
+
+    /// Seconds until `remaining` bytes are downloaded at the current rate, or
+    /// None without a usable rate.
+    fn eta(&self, remaining: u64) -> Option<i64> {
+        let rate = self.rate.filter(|r| *r >= 1.0)?;
+        Some((remaining as f64 / rate).ceil() as i64)
+    }
+}
+
 /// Tracks the category/download-dir chosen for each transfer.
 ///
 /// Reads are served from an in-memory cache for speed, while mutations are
@@ -71,6 +137,9 @@ pub struct StateManager {
     /// only when the *arr polls or the status line is logged, so it adds no
     /// measurable cost to the download hot path.
     local_bytes: Arc<RwLock<HashMap<String, Arc<AtomicU64>>>>,
+    /// The last rate sample of each transfer's local download, keyed by hash
+    /// like `local_bytes` and pruned with it (issue #56).
+    local_rates: Arc<RwLock<HashMap<String, RateSample>>>,
     /// Hashes of transfers the *arr removed with torrent-remove, and when.
     /// Download workers stop pulling their files, and a failed download isn't
     /// retried, so a removed transfer's files don't come back after its local
@@ -90,6 +159,7 @@ impl StateManager {
             orphans: Arc::new(RwLock::new(HashMap::new())),
             arr_error_logged: Arc::new(RwLock::new(HashMap::new())),
             local_bytes: Arc::new(RwLock::new(HashMap::new())),
+            local_rates: Arc::new(RwLock::new(HashMap::new())),
             removed: Arc::new(RwLock::new(HashMap::new())),
         }
     }
@@ -152,6 +222,7 @@ impl StateManager {
     /// map doesn't grow without bound over the process lifetime.
     pub async fn clear_local_bytes(&self, hash: &str) {
         self.local_bytes.write().await.remove(hash);
+        self.local_rates.write().await.remove(hash);
     }
 
     /// Drops local byte counters for transfers no longer present, keeping the
@@ -159,6 +230,20 @@ impl StateManager {
     /// [`Self::retain_file_names`]).
     pub async fn retain_local_bytes(&self, keep: &HashSet<String>) {
         self.local_bytes.write().await.retain(|h, _| keep.contains(h));
+        self.local_rates.write().await.retain(|h, _| keep.contains(h));
+    }
+
+    /// Estimated seconds until a transfer's local download is done, with
+    /// `remaining` bytes left (issue #56). Each call records a rate sample, and
+    /// torrent-get calls it on every poll, so an estimate appears from the
+    /// second poll after the download starts. None until then, or while
+    /// nothing is being downloaded.
+    pub async fn local_eta(&self, hash: &str, remaining: u64) -> Option<i64> {
+        let bytes = self.local_bytes_downloaded(hash).await?;
+        let mut rates = self.local_rates.write().await;
+        let sample = RateSample::next(rates.get(hash).copied(), Instant::now(), bytes);
+        rates.insert(hash.to_string(), sample);
+        sample.eta(remaining)
     }
 
     /// Minimum time between logging the same *arr's connection error.
@@ -342,5 +427,55 @@ mod tests {
         assert!(state.is_removed("abcd").await);
         state.clear_removed("AbCd").await;
         assert!(!state.is_removed("abcd").await);
+    }
+
+    const MB: u64 = 1_000_000;
+
+    #[test]
+    fn rate_comes_from_two_samples_and_follows_a_change_in_speed() {
+        let t0 = Instant::now();
+        let s = RateSample::next(None, t0, 0);
+        assert_eq!(s.eta(100 * MB), None);
+
+        // 60 MB in a minute: 1 MB/s, so 100 MB takes 100 seconds.
+        let s = RateSample::next(Some(s), t0 + Duration::from_secs(60), 60 * MB);
+        assert_eq!(s.eta(100 * MB), Some(100));
+
+        // Twice as fast for the next minute: the rate moves part of the way.
+        let s = RateSample::next(Some(s), t0 + Duration::from_secs(120), 180 * MB);
+        let eta = s.eta(100 * MB).unwrap();
+        assert!((50..100).contains(&eta), "eta {eta}");
+
+        // A stall makes the estimate grow instead of jumping to nothing.
+        let stalled = RateSample::next(Some(s), t0 + Duration::from_secs(180), 180 * MB);
+        assert!(stalled.eta(100 * MB).unwrap() > eta);
+    }
+
+    #[test]
+    fn close_samples_are_ignored_and_a_restarted_file_keeps_the_rate() {
+        let t0 = Instant::now();
+        let s = RateSample::next(None, t0, 0);
+        let s = RateSample::next(Some(s), t0 + Duration::from_secs(60), 60 * MB);
+
+        // A second poll a moment later doesn't change anything.
+        let close = RateSample::next(Some(s), t0 + Duration::from_secs(61), 70 * MB);
+        assert_eq!(close.bytes, 60 * MB);
+        assert_eq!(close.eta(100 * MB), Some(100));
+
+        // The counter going back (a file started over) keeps the rate.
+        let back = RateSample::next(Some(s), t0 + Duration::from_secs(90), 10 * MB);
+        assert_eq!(back.bytes, 10 * MB);
+        assert_eq!(back.eta(100 * MB), Some(100));
+    }
+
+    #[actix_rt::test]
+    async fn no_local_eta_before_the_download_starts() {
+        let state = StateManager::new("k".to_string());
+        assert_eq!(state.local_eta("abcd", 100).await, None);
+        state.local_byte_counter("abcd").await;
+        // The first poll only takes a sample.
+        assert_eq!(state.local_eta("abcd", 100).await, None);
+        state.clear_local_bytes("abcd").await;
+        assert!(state.local_rates.read().await.is_empty());
     }
 }
