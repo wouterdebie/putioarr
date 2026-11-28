@@ -245,7 +245,7 @@ mod tests {
     fn seconds_downloading_counts_from_started_at_in_utc() {
         let hour_ago = Timestamp::now() - jiff::SignedDuration::from_secs(3600);
         let started_at = hour_ago
-            .to_zoned(TimeZone::UTC)
+            .to_zoned_datetime(TimeZone::UTC)
             .strftime("%FT%T")
             .to_string();
         let t = PutIOTransfer {
