@@ -1,12 +1,11 @@
-# 0.6.13
+# 0.6.14
 
 Fixed
-- A download no longer sticks at 99% when its category folder doesn't
-  exist yet. The transfer's folder is created with any missing parents,
-  every failed file or folder logs why, and a failed download is retried
-  after 1, 2, 4 ... up to every 30 minutes while it's on put.io (#51)
+- Time Left in the *arr's queue no longer shows 00:00:00 while putioarr
+  pulls the files. It shows put.io's estimate while put.io downloads,
+  then putioarr's own estimate from the local download speed, and is
+  blank when there's no estimate yet (#56)
 
-New
-- Removing a download in the *arr ("Remove from Download Client") also
-  deletes its local copy in download_directory, as Transmission does,
-  unless keep_downloads is on. Downloads of a removed transfer stop (#52)
+Dependencies
+- url 2.5.9 for RUSTSEC-2026-0592, jiff 1.0, nix 0.32, actix-rt 2.16,
+  actix-web 4.20 and clap 4.6.9 (#53, #54, #55)
